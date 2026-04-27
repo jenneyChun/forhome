@@ -129,6 +129,15 @@ textarea{resize:vertical;min-height:70px;}
 .activity-item:last-child{border-bottom:none;}
 .back-btn{display:flex;align-items:center;gap:6px;color:#667eea;font-size:14px;font-weight:bold;cursor:pointer;margin-bottom:14px;border:none;background:none;padding:0;}
 
+/* CALENDAR */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.cal-day{min-height:52px;background:#f8f9ff;border-radius:8px;padding:3px 4px;cursor:pointer;border:2px solid transparent;transition:all .15s;}
+.cal-day:hover{border-color:#667eea;}
+.cal-day.today{border-color:#667eea;background:#eef3ff;}
+.cal-day.cal-sel{border-color:#764ba2;background:#f0ebff;}
+.cal-day-num{font-size:12px;font-weight:bold;color:#444;}
+.cal-day-num.today-num{color:#667eea;}
+
 /* ANIMATIONS */
 @keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-7px);}}
 @keyframes confettiFall{0%{transform:translateY(-60px) rotate(0);opacity:1;}100%{transform:translateY(105vh) rotate(720deg);opacity:0;}}
@@ -151,7 +160,7 @@ textarea{resize:vertical;min-height:70px;}
     <button class="btn-login" onclick="doLogin()">로그인 →</button>
     <div class="login-hint">
       엄마: mom / mom1234 &nbsp;|&nbsp; 아빠: dad / dad1234<br>
-      관리자: admin / admin1234
+      아들: son / son1234 &nbsp;|&nbsp; 관리자: admin / admin1234
     </div>
   </div>
 </div>
@@ -165,7 +174,7 @@ textarea{resize:vertical;min-height:70px;}
   <nav class="nav">
     <button class="nav-btn active" onclick="showTab('home')"><span class="ic">🏠</span>홈</button>
     <button class="nav-btn" onclick="showTab('tasks')"><span class="ic">✅</span>할 일</button>
-    <button class="nav-btn" onclick="showTab('rankings')"><span class="ic">🏆</span>순위</button>
+    <button class="nav-btn" onclick="showTab('calendar')"><span class="ic">📅</span>달력</button>
     <button class="nav-btn" onclick="showTab('badges')"><span class="ic">🌟</span>뱃지</button>
     <button class="nav-btn" onclick="showTab('settings')"><span class="ic">⚙️</span>설정</button>
   </nav>
@@ -174,6 +183,7 @@ textarea{resize:vertical;min-height:70px;}
     <!-- HOME -->
     <div class="sec active" id="sec-home">
       <div class="card" id="balanceCard"></div>
+      <div class="card" id="homeRankCard"></div>
       <div class="card" id="msgCard">
         <div class="card-title">💬 가족 메시지</div>
         <select id="msgTo" style="margin-bottom:8px;"></select>
@@ -202,14 +212,9 @@ textarea{resize:vertical;min-height:70px;}
       </div>
     </div>
 
-    <!-- RANKINGS -->
-    <div class="sec" id="sec-rankings">
-      <div style="display:flex;gap:8px;margin-bottom:12px;">
-        <button class="btn btn-sm" id="weekBtn" onclick="setRankPeriod('week')" style="flex:1;background:#667eea;color:white;">이번 주</button>
-        <button class="btn btn-sm" id="allBtn" onclick="setRankPeriod('all')" style="flex:1;background:#eee;color:#333;">전체 기록</button>
-      </div>
-      <div id="rankingList"></div>
-      <div class="card" id="praiseCard"></div>
+    <!-- CALENDAR -->
+    <div class="sec" id="sec-calendar">
+      <div id="calendarContent"></div>
     </div>
 
     <!-- BADGES -->
@@ -253,7 +258,7 @@ textarea{resize:vertical;min-height:70px;}
 const MEMBER_EMOJIS = ['👩','👨','👧','👦','👴','👵','🧑','🧔','🐱','🐈','🐶','🐰','🐹','🦁'];
 const CHORE_EMOJIS  = ['🍽️','🧹','🧺','🚿','🍳','🛒','🗑️','🫧','🪣','🧴','🪟','🌿','🐾','🍱','🏠','☕','🛁','🧽','📚','🎮','📖','🎒','🍎','🎨','🏃'];
 
-const CATEGORIES = {all:'전체', house:'🏠 집안일', care:'👶 육아', pet:'🐱 반려동물'};
+const CATEGORIES = {all:'전체', house:'🏠 집안일', care:'👶 육아', pet:'🐱 반려동물', child:'👦 자녀'};
 
 const FIXED_MEMBERS = [
   {id:'mom',   name:'엄마', emoji:'👩', restricted:true},
@@ -266,6 +271,7 @@ const FIXED_MEMBERS = [
 const DEFAULT_ACCOUNTS = [
   {id:'mom',   password:'mom1234',   memberId:'mom',   isAdmin:false},
   {id:'dad',   password:'dad1234',   memberId:'dad',   isAdmin:false},
+  {id:'son',   password:'son1234',   memberId:'son',   isAdmin:false},
   {id:'admin', password:'admin1234', memberId:null,    isAdmin:true},
 ];
 
@@ -297,22 +303,30 @@ const DEFAULT_CHORES = [
   {id:'pet1',name:'고양이 밥 주기',      emoji:'🐱', fatigue:1, xp:10, category:'pet'},
   {id:'pet2',name:'고양이 화장실 청소',  emoji:'🪣', fatigue:2, xp:25, category:'pet'},
   {id:'pet3',name:'고양이 놀아주기',     emoji:'🎾', fatigue:1, xp:15, category:'pet'},
+  // 자녀
+  {id:'ch1', name:'스스로 밥먹기',       emoji:'🍚', fatigue:1, xp:10, category:'child'},
+  {id:'ch2', name:'일찍 일어나기',       emoji:'☀️', fatigue:1, xp:15, category:'child'},
+  {id:'ch3', name:'일찍 눕기',           emoji:'🌙', fatigue:1, xp:15, category:'child'},
+  {id:'ch4', name:'세수하기',            emoji:'🪥', fatigue:1, xp:10, category:'child'},
+  {id:'ch5', name:'집와서 바로 손씻기',  emoji:'🤲', fatigue:1, xp:10, category:'child'},
+  {id:'ch6', name:'책상 정리하기',       emoji:'📚', fatigue:1, xp:15, category:'child'},
+  {id:'ch7', name:'침대 정리하기',       emoji:'🛏️', fatigue:1, xp:15, category:'child'},
 ];
 
 const BADGES = [
-  {id:'first',  emoji:'🌱',name:'첫 걸음',     desc:'첫 번째 일 완료',         cond:m=>m.completedTasks>=1},
-  {id:'t5',     emoji:'⭐',name:'열심히쟁이',   desc:'5회 완료',                cond:m=>m.completedTasks>=5},
-  {id:'t10',    emoji:'🌟',name:'일 달인',      desc:'10회 완료',               cond:m=>m.completedTasks>=10},
-  {id:'t20',    emoji:'💎',name:'슈퍼 히어로',  desc:'20회 완료',               cond:m=>m.completedTasks>=20},
-  {id:'xp100',  emoji:'🏅',name:'100XP',        desc:'경험치 100 달성',         cond:m=>m.xp>=100},
-  {id:'xp300',  emoji:'🥇',name:'XP 마스터',   desc:'경험치 300 달성',         cond:m=>m.xp>=300},
-  {id:'fat30',  emoji:'💪',name:'진짜 고생',    desc:'총 피로도 30 이상',       cond:m=>m.totalFatigue>=30},
-  {id:'st5',    emoji:'🎀',name:'스티커 수집가',desc:'칭찬 스티커 5개',         cond:m=>m.stickers>=5},
-  {id:'st10',   emoji:'🎁',name:'스티커 부자',  desc:'칭찬 스티커 10개',        cond:m=>m.stickers>=10},
-  {id:'vac',    emoji:'🌴',name:'휴가 권리자',  desc:'이번 주 최다 노동!',      cond:m=>m.onVacation},
-  {id:'cook3',  emoji:'👨‍🍳',name:'요리왕',      desc:'요리 3회 완료',           cond:(m,h)=>h.filter(x=>x.memberId===m.id&&x.choreId==='c6').length>=3},
-  {id:'clean5', emoji:'🧹',name:'청소 챔피언',  desc:'청소 5회 완료',           cond:(m,h)=>h.filter(x=>x.memberId===m.id&&['c2','c5','c9','c10','c11'].includes(x.choreId)).length>=5},
-  {id:'care5',  emoji:'👶',name:'육아 히어로',  desc:'육아 5회 완료',           cond:(m,h)=>h.filter(x=>x.memberId===m.id&&x.choreId.startsWith('p')).length>=5},
+  {id:'first',  emoji:'🌱',name:'이번 주 시작',  desc:'이번 주 첫 번째 일 완료',    cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=1},
+  {id:'t7',     emoji:'⭐',name:'열심히쟁이',    desc:'이번 주 7회 완료',            cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=7},
+  {id:'t15',    emoji:'🌟',name:'일 달인',       desc:'이번 주 15회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=15},
+  {id:'t25',    emoji:'💎',name:'슈퍼 히어로',   desc:'이번 주 25회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=25},
+  {id:'xp150',  emoji:'🏅',name:'150XP 달성',   desc:'이번 주 XP 150 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=150},
+  {id:'xp400',  emoji:'🥇',name:'XP 마스터',    desc:'이번 주 XP 400 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=400},
+  {id:'fat20',  emoji:'💪',name:'진짜 고생',     desc:'이번 주 피로도 20 이상',      cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.fatigueAdded,0)>=20},
+  {id:'st7',    emoji:'🎀',name:'스티커 수집가', desc:'이번 주 스티커 7개',          cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=7},
+  {id:'st15',   emoji:'🎁',name:'스티커 부자',   desc:'이번 주 스티커 15개',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=15},
+  {id:'vac',    emoji:'🌴',name:'휴가 권리자',   desc:'이번 주 최다 노동!',          cond:(m,wh)=>m.onVacation},
+  {id:'cook2',  emoji:'👨‍🍳',name:'요리왕',       desc:'이번 주 요리 2회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId==='c6').length>=2},
+  {id:'clean4', emoji:'🧹',name:'청소 챔피언',   desc:'이번 주 청소 4회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&['c2','c5','c9','c10','c11'].includes(x.choreId)).length>=4},
+  {id:'care4',  emoji:'👶',name:'육아 히어로',   desc:'이번 주 육아 4회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId.startsWith('p')).length>=4},
 ];
 
 const TITLES = ['히어로 새싹 🌱','히어로 견습생 ⭐','히어로 달인 🌟','히어로 고수 💪','히어로 챔피언 🏆','전설의 히어로 👑'];
@@ -339,7 +353,7 @@ let S = {
   chores: [...DEFAULT_CHORES],
   history: [],
   messages: [],
-  settings: {vacationThreshold:25},
+  settings: {vacationThreshold:25, githubRepo:'', githubToken:'', lastWeeklyReport:0, lastMonthlyReport:0},
   loggedIn: null, // {accountId, memberId, isAdmin}
   // UI
   selMemberId: null,
@@ -349,8 +363,11 @@ let S = {
   selBadgeMember: null,
   selMemberEmoji: '👩',
   selChoreEmoji: '🍽️',
-  settingsView: 'main', // 'main' | 'chore-detail' | 'add-member' | 'add-account'
+  badgeHistory: [],
+  badgeResetWeek: 0,
+  settingsView: 'main', // 'main' | 'chore-list' | 'chore-detail'
   choreDetailId: null,
+  choreDetailFrom: 'main',
 };
 
 function load(){
@@ -358,13 +375,15 @@ function load(){
     const d = localStorage.getItem('houseHeroV3');
     if(d){
       const p = JSON.parse(d);
-      S.accounts  = p.accounts  || initAccounts();
-      S.members   = p.members   || initMembers();
-      S.chores    = p.chores    || [...DEFAULT_CHORES];
-      S.history   = p.history   || [];
-      S.messages  = p.messages  || [];
-      S.settings  = p.settings  || {vacationThreshold:25};
-      S.loggedIn  = p.loggedIn  || null;
+      S.accounts       = p.accounts       || initAccounts();
+      S.members        = p.members        || initMembers();
+      S.chores         = p.chores         || [...DEFAULT_CHORES];
+      S.history        = p.history        || [];
+      S.messages       = p.messages       || [];
+      S.settings       = p.settings       || {vacationThreshold:25};
+      S.loggedIn       = p.loggedIn       || null;
+      S.badgeHistory   = p.badgeHistory   || [];
+      S.badgeResetWeek = p.badgeResetWeek || 0;
     } else {
       S.accounts = initAccounts();
       S.members  = initMembers();
@@ -378,6 +397,10 @@ function load(){
     if(m.id==='jerry' && m.name.includes('블루')) m.name = '제리';
     if(m.id==='tori'  && m.name.includes('시니')) m.name = '또리';
   });
+  // chore migration: add any new default chores not yet in saved data
+  DEFAULT_CHORES.forEach(dc=>{ if(!S.chores.find(c=>c.id===dc.id)) S.chores.push(dc); });
+  // account migration: add son account if missing
+  DEFAULT_ACCOUNTS.forEach(da=>{ if(!S.accounts.find(a=>a.id===da.id)) S.accounts.push({...da}); });
 }
 
 function initAccounts(){ return DEFAULT_ACCOUNTS.map(a=>({...a})); }
@@ -392,7 +415,7 @@ function persist(){
     localStorage.setItem('houseHeroV3', JSON.stringify({
       accounts:S.accounts, members:S.members, chores:S.chores,
       history:S.history, messages:S.messages, settings:S.settings,
-      loggedIn:S.loggedIn,
+      loggedIn:S.loggedIn, badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
     }));
   }catch(e){}
 }
@@ -447,7 +470,7 @@ function getTaskDoers(){
   }
   const me = S.members.find(m=>m.id===S.loggedIn.memberId);
   const result = me ? [me] : [];
-  if(son) result.push(son);
+  if(son && son.id !== S.loggedIn.memberId) result.push(son);
   return result;
 }
 
@@ -459,10 +482,26 @@ function checkVacation(){
   doers.forEach((m,i)=>{ m.onVacation = fs[i]>S.settings.vacationThreshold && fs[i]>avg*1.4; });
 }
 
+function resetBadgesIfNewWeek(){
+  const ws=weekStart();
+  if(ws>S.badgeResetWeek){
+    S.members.forEach(m=>{ m.earnedBadges=[]; });
+    S.badgeResetWeek=ws;
+  }
+}
+
 function checkBadges(m){
+  resetBadgesIfNewWeek();
   if(!m.earnedBadges) m.earnedBadges=[];
+  const wh=S.history.filter(h=>h.timestamp>=weekStart());
   const newOnes=[];
-  BADGES.forEach(b=>{ if(!m.earnedBadges.includes(b.id)&&b.cond(m,S.history)){ m.earnedBadges.push(b.id); newOnes.push(b); } });
+  BADGES.forEach(b=>{
+    if(!m.earnedBadges.includes(b.id)&&b.cond(m,wh)){
+      m.earnedBadges.push(b.id);
+      newOnes.push(b);
+      S.badgeHistory.push({memberId:m.id,badgeId:b.id,emoji:b.emoji,name:b.name,timestamp:Date.now()});
+    }
+  });
   return newOnes;
 }
 
@@ -497,6 +536,7 @@ function showMain(){
   document.getElementById('vacThreshold')?.value && (document.getElementById('vacThreshold').value=S.settings.vacationThreshold);
   checkVacation();
   showTab('home');
+  setTimeout(checkAutoReport, 2000); // 로그인 후 자동 보고서 체크
 }
 
 function confirmLogout(){
@@ -517,11 +557,11 @@ function showTab(tab){
   document.querySelectorAll('.sec').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('sec-'+tab).classList.add('active');
-  const tabs=['home','tasks','rankings','badges','settings'];
+  const tabs=['home','tasks','calendar','badges','settings'];
   document.querySelectorAll('.nav-btn')[tabs.indexOf(tab)]?.classList.add('active');
   if(tab==='home')     renderHome();
   if(tab==='tasks')    renderTasks();
-  if(tab==='rankings') renderRankings();
+  if(tab==='calendar') renderCalendar();
   if(tab==='badges')   renderBadges();
   if(tab==='settings'){ S.settingsView='main'; renderSettings(); }
 }
@@ -531,6 +571,7 @@ function showTab(tab){
 // ═══════════════════════════════════════
 function renderHome(){
   renderBalance();
+  renderHomeRank();
   renderMsgFeed();
   renderActivity();
 }
@@ -601,12 +642,65 @@ function renderActivity(){
   }).join('');
 }
 
+let homeShowAllHistory = false;
+
+function renderHomeRank(){
+  const card = document.getElementById('homeRankCard');
+  const doers = S.members.filter(m=>m.restricted);
+  if(!doers.length){ card.innerHTML=''; return; }
+  const RE=['🥇','🥈','🥉'], RC=['#ffd700','#c0c0c0','#cd7f32'], RB=['#fff9e6','#f8f8f8','#fff4ec'];
+  const sorted = [...doers].sort((a,b)=>wFatigue(b.id)-wFatigue(a.id));
+  const rankHtml = sorted.map((m,i)=>{
+    const wf=wFatigue(m.id), wt=wTasks(m.id);
+    return`<div class="rank-item" style="background:${RB[i]||'#f9f9f9'};padding:8px 10px;">
+      <div style="width:26px;height:26px;border-radius:50%;background:${RC[i]||'#eee'};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">${RE[i]||i+1}</div>
+      <div style="font-size:18px;">${m.emoji}</div>
+      <div style="flex:1;"><div style="font-weight:bold;font-size:13px;">${m.name}</div><div style="font-size:11px;color:#888;">${wt}개 완료 · 피로도 ${wf}</div></div>
+      <div style="font-size:15px;font-weight:bold;color:#667eea;">${m.xp}XP</div>
+    </div>`;
+  }).join('');
+
+  let historyHtml='';
+  if(homeShowAllHistory){
+    const all=[...S.history].reverse();
+    if(!all.length){ historyHtml='<p class="empty-msg">기록이 없어요.</p>'; }
+    else {
+      historyHtml=all.map(h=>{
+        const m=member(h.memberId), c=S.chores.find(x=>x.id===h.choreId);
+        if(!m||!c) return '';
+        const d=new Date(h.timestamp);
+        const ds=`${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+        return`<div class="activity-item">
+          <span style="font-size:16px;">${c.emoji}</span>
+          <div style="flex:1;"><b>${m.emoji} ${m.name}</b> · <span style="color:#667eea;">${c.name}</span></div>
+          <div style="font-size:10px;color:#aaa;text-align:right;">${ds}<br><span style="background:#ffd93d;color:#333;padding:1px 4px;border-radius:6px;font-size:9px;">+${h.xpEarned}XP</span></div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  card.innerHTML=`
+    <div class="card-title">🏆 이번 주 순위</div>
+    ${rankHtml}
+    <div style="margin-top:8px;border-top:1px solid #eee;padding-top:8px;">
+      <button class="btn btn-sm" onclick="toggleHomeHistory()" style="width:100%;background:#f0f2ff;color:#667eea;font-weight:bold;">
+        ${homeShowAllHistory?'▲ 전체 기록 접기':'▼ 전체 기록 보기'}
+      </button>
+    </div>
+    ${homeShowAllHistory?`<div style="margin-top:8px;max-height:320px;overflow-y:auto;">${historyHtml}</div>`:''}
+  `;
+}
+
+function toggleHomeHistory(){ homeShowAllHistory=!homeShowAllHistory; renderHomeRank(); }
+
 // ═══════════════════════════════════════
 //  TASKS (할 일)
 // ═══════════════════════════════════════
 function renderTasks(){
   // 로그인한 사람 자동 선택 (아직 선택 안 됐을 때)
   if(!S.selMemberId && S.loggedIn?.memberId) S.selMemberId = S.loggedIn.memberId;
+  // 아들 계정이면 자녀 카테고리 자동 선택
+  if(S.loggedIn?.memberId==='son' && S.selCategory==='all') S.selCategory='child';
   // 멤버 선택 (로그인한 사람 + 아들)
   const doers = getTaskDoers();
   const mSel=document.getElementById('memberSelector');
@@ -663,42 +757,111 @@ function completeTask(){
 }
 
 // ═══════════════════════════════════════
-//  RANKINGS
+//  CALENDAR
 // ═══════════════════════════════════════
-function renderRankings(){
-  const list=document.getElementById('rankingList'), praise=document.getElementById('praiseCard');
-  const doers=S.members.filter(m=>m.restricted);
-  if(!doers.length){ list.innerHTML='<div class="card empty-msg">가족을 추가하면 순위가 표시돼요!</div>'; praise.innerHTML=''; return; }
-  const sorted=[...doers].sort((a,b)=>S.rankPeriod==='week'?wFatigue(b.id)-wFatigue(a.id):b.totalFatigue-a.totalFatigue);
-  const RE=['🥇','🥈','🥉','4️⃣','5️⃣'];
-  const RC=['#ffd700','#c0c0c0','#cd7f32','#ddd','#ddd'];
-  const RB=['#fff9e6','#f8f8f8','#fff4ec','#f9f9f9'];
-  list.innerHTML=sorted.map((m,i)=>{
-    const f=S.rankPeriod==='week'?wFatigue(m.id):m.totalFatigue;
-    const t=S.rankPeriod==='week'?wTasks(m.id):m.completedTasks;
-    return`<div class="rank-item" style="background:${RB[i]||'#f9f9f9'};">
-      <div style="width:30px;height:30px;border-radius:50%;background:${RC[i]||'#eee'};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">${RE[i]||i+1}</div>
-      <div style="font-size:20px;">${m.emoji}</div>
-      <div style="flex:1;"><div style="font-weight:bold;font-size:14px;">${m.name}</div><div style="font-size:11px;color:#888;">${t}개 완료 · 피로도 ${f}</div></div>
-      <div style="text-align:right;"><div style="font-size:17px;font-weight:bold;color:#667eea;">${m.xp}XP</div><div style="font-size:11px;color:#aaa;">⭐${m.stickers}</div></div>
-    </div>`;
-  }).join('');
-  if(sorted.length){
-    const top=sorted[0], tf=S.rankPeriod==='week'?wFatigue(top.id):top.totalFatigue;
-    praise.innerHTML=`<div style="text-align:center;padding:6px;">
-      <div style="font-size:38px;animation:float 2s ease-in-out infinite;">${top.emoji}</div>
-      <div style="font-size:16px;font-weight:bold;margin:7px 0;">${top.name}님이 이번 주 히어로! 🦸</div>
-      <div style="color:#666;font-size:12px;">피로도 ${tf}점 · ${top.completedTasks}개 완료</div>
-      <div style="margin-top:8px;color:#888;font-size:13px;font-style:italic;">"${PRAISES[Math.floor(Math.random()*PRAISES.length)]}"</div>
+let calYear=new Date().getFullYear(), calMonth=new Date().getMonth(), calSelDate=null;
+const MONTH_NAMES=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+const DAY_NAMES=['일','월','화','수','목','금','토'];
+
+function renderCalendar(){
+  const el=document.getElementById('calendarContent');
+  const firstDay=new Date(calYear,calMonth,1);
+  const lastDay=new Date(calYear,calMonth+1,0);
+  const startDow=firstDay.getDay();
+  const today=new Date();
+  const todayKey=`${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+
+  // 날짜별 기록 맵 (집안일 + 뱃지)
+  const dayMap={};
+  S.history.forEach(h=>{
+    const d=new Date(h.timestamp);
+    const key=`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if(!dayMap[key]) dayMap[key]={tasks:[],badges:[]};
+    dayMap[key].tasks.push(h);
+  });
+  S.badgeHistory.forEach(b=>{
+    const d=new Date(b.timestamp);
+    const key=`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if(!dayMap[key]) dayMap[key]={tasks:[],badges:[]};
+    dayMap[key].badges.push(b);
+  });
+
+  // 요일 헤더
+  let cells=DAY_NAMES.map(d=>`<div style="text-align:center;font-size:11px;font-weight:bold;color:#888;padding:3px 0;">${d}</div>`).join('');
+
+  // 빈 칸 (월 시작 전)
+  for(let i=0;i<startDow;i++) cells+='<div></div>';
+
+  // 날짜 셀
+  for(let d=1;d<=lastDay.getDate();d++){
+    const key=`${calYear}-${calMonth}-${d}`;
+    const dayData=dayMap[key]||{tasks:[],badges:[]};
+    const isToday=key===todayKey;
+    const isSel=calSelDate===key;
+    const emojis=[...new Set(dayData.tasks.map(h=>member(h.memberId)?.emoji||''))].filter(Boolean).slice(0,3).join('');
+    const badgeEmojis=dayData.badges.map(b=>b.emoji).slice(0,2).join('');
+    cells+=`<div class="cal-day${isToday?' today':''}${isSel?' cal-sel':''}" onclick="calSelectDay('${key}')">
+      <div class="cal-day-num${isToday?' today-num':''}">${d}</div>
+      ${emojis?`<div style="font-size:10px;line-height:1.3;">${emojis}</div>`:''}
+      ${dayData.tasks.length?`<div style="font-size:9px;color:#667eea;font-weight:bold;">${dayData.tasks.length}건</div>`:''}
+      ${badgeEmojis?`<div style="font-size:10px;">${badgeEmojis}</div>`:''}
     </div>`;
   }
+
+  // 선택된 날 상세
+  let detailHtml='';
+  if(calSelDate && dayMap[calSelDate]){
+    const dd=dayMap[calSelDate];
+    const parts=calSelDate.split('-');
+    const label=`${parseInt(parts[1])+1}월 ${parts[2]}일`;
+    const taskRows=dd.tasks.map(h=>{
+      const m=member(h.memberId), c=S.chores.find(x=>x.id===h.choreId);
+      if(!m||!c) return '';
+      const t=new Date(h.timestamp);
+      const ts=`${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`;
+      return`<div class="activity-item">
+        <span style="font-size:16px;">${c.emoji}</span>
+        <div style="flex:1;"><b>${m.emoji} ${m.name}</b> · <span style="color:#667eea;">${c.name}</span></div>
+        <div style="font-size:10px;color:#aaa;text-align:right;">${ts}<br><span style="background:#ffd93d;color:#333;padding:1px 5px;border-radius:6px;font-size:9px;">+${h.xpEarned}XP</span></div>
+      </div>`;
+    }).join('');
+    const badgeRows=dd.badges.map(b=>{
+      const m=member(b.memberId);
+      if(!m) return '';
+      return`<div class="activity-item">
+        <span style="font-size:16px;">${b.emoji}</span>
+        <div style="flex:1;"><b>${m.emoji} ${m.name}</b> · <span style="color:#764ba2;">🏅 ${b.name} 뱃지 획득!</span></div>
+      </div>`;
+    }).join('');
+    detailHtml=`<div class="card" style="margin-top:10px;">
+      <div class="card-title">📋 ${label} 기록 (${dd.tasks.length}건${dd.badges.length?` · 🏅 뱃지 ${dd.badges.length}개`:''})</div>
+      ${badgeRows}${taskRows||'<p class="empty-msg">기록이 없어요.</p>'}
+    </div>`;
+  }
+
+  el.innerHTML=`
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <button class="btn btn-sm" onclick="calNav(-1)" style="background:#eee;color:#333;padding:6px 14px;">◀</button>
+        <div style="font-weight:bold;font-size:16px;">${calYear}년 ${MONTH_NAMES[calMonth]}</div>
+        <button class="btn btn-sm" onclick="calNav(1)" style="background:#eee;color:#333;padding:6px 14px;">▶</button>
+      </div>
+      <div class="cal-grid">${cells}</div>
+    </div>
+    ${detailHtml}
+  `;
 }
 
-function setRankPeriod(p){
-  S.rankPeriod=p;
-  document.getElementById('weekBtn').style.cssText=`flex:1;background:${p==='week'?'#667eea':'#eee'};color:${p==='week'?'white':'#333'};`;
-  document.getElementById('allBtn').style.cssText=`flex:1;background:${p==='all'?'#667eea':'#eee'};color:${p==='all'?'white':'#333'};`;
-  renderRankings();
+function calNav(dir){
+  calMonth+=dir;
+  if(calMonth<0){calMonth=11;calYear--;}
+  if(calMonth>11){calMonth=0;calYear++;}
+  calSelDate=null; renderCalendar();
+}
+
+function calSelectDay(key){
+  calSelDate=calSelDate===key?null:key;
+  renderCalendar();
 }
 
 // ═══════════════════════════════════════
@@ -707,7 +870,7 @@ function setRankPeriod(p){
 function renderBadges(){
   const tabs=document.getElementById('badgeMemberTabs'), disp=document.getElementById('badgeDisplay');
   if(!S.loggedIn) return;
-  const showMembers = S.loggedIn.isAdmin ? S.members : S.members.filter(m=>m.restricted);
+  const showMembers = S.members.filter(m=>m.id!=='jerry'&&m.id!=='tori'&&(S.loggedIn.isAdmin||m.restricted));
   if(!showMembers.length){ tabs.innerHTML=''; disp.innerHTML='<div class="card empty-msg">뱃지를 볼 가족이 없어요!</div>'; return; }
   if(!S.selBadgeMember) S.selBadgeMember=showMembers[0].id;
   tabs.innerHTML=showMembers.map(m=>`
@@ -717,11 +880,23 @@ function renderBadges(){
     </button>`).join('');
   const m=member(S.selBadgeMember);
   if(!m) return;
+  resetBadgesIfNewWeek();
   const earned=m.earnedBadges||[];
-  const stars='⭐'.repeat(Math.min(m.stickers,20))+(m.stickers>20?`<div style="font-size:13px;margin-top:4px;">+${m.stickers-20}개 더!</div>`:'');
+  const wt=wTasks(m.id), wf=wFatigue(m.id);
+  const wStickers=wt;
+  const stars='⭐'.repeat(Math.min(wStickers,20))+(wStickers>20?`<div style="font-size:13px;margin-top:4px;">+${wStickers-20}개 더!</div>`:'');
   disp.innerHTML=`
     <div class="card">
-      <div class="card-title">🏅 ${m.emoji} ${m.name}의 뱃지 (${earned.length}/${BADGES.length})</div>
+      <div class="card-title">📊 이번 주 현황</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;">
+        <div class="stat-box" style="background:#eaf2ff;"><div class="stat-lbl">✅ 완료</div><div class="stat-val">${wt}</div></div>
+        <div class="stat-box" style="background:#fdedec;"><div class="stat-lbl">💦 피로도</div><div class="stat-val">${wf}</div></div>
+        <div class="stat-box" style="background:#fef9e7;"><div class="stat-lbl">⭐ 스티커</div><div class="stat-val">${wStickers}</div></div>
+      </div>
+      <div style="font-size:11px;color:#aaa;text-align:center;margin-top:6px;">뱃지는 매주 월요일 자정 리셋 🔄</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏅 ${m.emoji} ${m.name}의 이번 주 뱃지 (${earned.length}/${BADGES.length})</div>
       <div class="badge-grid">${BADGES.map(b=>{
         const has=earned.includes(b.id);
         return`<div class="bdg${has?'':' locked'}">
@@ -732,9 +907,8 @@ function renderBadges(){
       }).join('')}</div>
     </div>
     <div class="card">
-      <div class="card-title">⭐ 칭찬 스티커 (${m.stickers}개)</div>
-      <div style="text-align:center;font-size:24px;line-height:1.7;">${stars}</div>
-      <div style="text-align:center;color:#888;font-size:13px;margin-top:6px;">총 ${m.stickers}개 🎉</div>
+      <div class="card-title">⭐ 이번 주 칭찬 스티커 (${wStickers}개)</div>
+      <div style="text-align:center;font-size:24px;line-height:1.7;">${stars||'<span style="color:#ccc;font-size:14px;">아직 스티커가 없어요. 화이팅! 💪</span>'}</div>
     </div>`;
 }
 
@@ -745,17 +919,19 @@ function selBadgeMember(id){ S.selBadgeMember=id; renderBadges(); }
 // ═══════════════════════════════════════
 function renderSettings(){
   if(S.settingsView==='chore-detail') renderChoreDetail();
+  else if(S.settingsView==='chore-list') renderChoreList();
   else renderSettingsMain();
 }
 
 function goSettingsMain(){ S.settingsView='main'; S.choreDetailId=null; renderSettings(); }
+function openChoreList(){ S.settingsView='chore-list'; renderSettings(); }
 
 function renderSettingsMain(){
   const isAdmin = S.loggedIn?.isAdmin;
   const el = document.getElementById('settingsContent');
 
-  // 가족 현황
-  let memberRows = S.members.map((m,i)=>`
+  // 가족 현황 (제리/또리 제외)
+  let memberRows = S.members.filter(m=>m.id!=='jerry'&&m.id!=='tori').map((m,i)=>`
     <div class="settings-row">
       <div class="avatar" style="background:${color(i)}20;width:38px;height:38px;font-size:19px;">${m.emoji}</div>
       <div style="flex:1;">
@@ -766,16 +942,6 @@ function renderSettingsMain(){
       ${isAdmin?`<button class="btn btn-sm btn-red" onclick="removeMember('${m.id}')" style="margin-left:4px;">삭제</button>`:''}
     </div>`).join('');
 
-  // 집안일 목록 버튼
-  let choreButtons = S.chores.map(c=>`
-    <button class="chore-btn" onclick="openChoreDetail('${c.id}')">
-      <span style="font-size:20px;">${c.emoji}</span>
-      <div style="flex:1;">
-        <div style="font-weight:bold;font-size:13px;">${c.name}</div>
-        <div style="font-size:11px;color:#888;">${CATEGORIES[c.category]||c.category} · 피로도 💦${c.fatigue} · +${c.xp}XP</div>
-      </div>
-      <span style="color:#aaa;font-size:18px;">›</span>
-    </button>`).join('');
 
   // 계정 관리 (admin 전용)
   let accountSection = '';
@@ -830,25 +996,12 @@ function renderSettingsMain(){
     </div>
     <div class="card">
       <div class="card-title">🧹 집안일 목록 관리</div>
-      ${choreButtons||'<p class="empty-msg">집안일이 없어요.</p>'}
-      ${isAdmin?`<div style="margin-top:6px;border-top:1px solid #eee;padding-top:10px;">
-        <div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:8px;">새 항목 추가</div>
-        <div class="emoji-grid" id="choreEmojiPicker">${CHORE_EMOJIS.map(e=>`<button class="emoji-btn${S.selChoreEmoji===e?' sel':''}" onclick="selChoreEmoji('${e}')">${e}</button>`).join('')}</div>
-        <input type="text" id="newChoreName" placeholder="이름">
-        <select id="newChoreCategory">
-          <option value="house">🏠 집안일</option>
-          <option value="care">👶 육아</option>
-          <option value="pet">🐱 반려동물</option>
-        </select>
-        <select id="newChoreFatigue">
-          <option value="1">피로도 1 — 아주 쉬움</option>
-          <option value="2" selected>피로도 2 — 쉬움</option>
-          <option value="3">피로도 3 — 보통</option>
-          <option value="4">피로도 4 — 힘듦</option>
-          <option value="5">피로도 5 — 매우 힘듦</option>
-        </select>
-        <button class="btn btn-primary" onclick="addChore()" style="margin-top:0;">추가하기</button>
-      </div>`:''}
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">총 ${S.chores.length}개 항목</div>
+      <button class="chore-btn" onclick="openChoreList()" style="border-color:#667eea20;">
+        <span style="font-size:20px;">📋</span>
+        <div style="flex:1;"><div style="font-weight:bold;font-size:13px;">목록 전체 보기 / 수정</div><div style="font-size:11px;color:#888;">집안일·육아·반려동물 항목 관리</div></div>
+        <span style="color:#667eea;font-size:18px;">›</span>
+      </button>
     </div>
     ${addMemberSection}
     ${accountSection}
@@ -862,7 +1015,33 @@ function renderSettingsMain(){
            <div style="font-size:11px;color:#aaa;text-align:center;">변경은 관리자만 가능합니다 👑</div>`
       }
     </div>
+    <div class="card">
+      <div class="card-title">📊 보고서 다운로드</div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">현재 데이터를 CSV(엑셀)·MD 파일로 저장합니다.</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm" onclick="downloadReport('week')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 주</button>
+        <button class="btn btn-sm" onclick="downloadReport('month')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 달</button>
+      </div>
+    </div>
     ${isAdmin?`
+    <div class="card">
+      <div class="card-title">📱 카카오톡 일일 요약</div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">오늘 하루의 집안일·가족 메시지를 JSON으로 저장합니다.<br>저장 후 <b>send_kakao.ps1</b>을 실행하면 카카오톡으로 발송돼요.<br>자정이 되면 자동으로 저장됩니다.</div>
+      <button class="btn btn-primary" onclick="downloadDailySummary()" style="margin-top:0;">📤 오늘 요약 저장하기</button>
+    </div>
+    <div class="card">
+      <div class="card-title">🐙 GitHub 자동 저장</div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">주간·월간 보고서를 GitHub 저장소에 자동으로 저장합니다.<br>새 주·새 달 시작 시 로그인하면 자동으로 이전 기간 보고서가 저장돼요.</div>
+      <input type="text" id="ghRepo" placeholder="저장소 (예: cejingme/forhome)" value="${S.settings.githubRepo||''}">
+      <input type="password" id="ghToken" placeholder="GitHub PAT (ghp_...)" value="${S.settings.githubToken||''}">
+      <button class="btn btn-primary" onclick="saveGithubSettings()" style="margin-top:0;">설정 저장 💾</button>
+      ${S.settings.githubRepo?`<div style="font-size:11px;color:#27ae60;margin-bottom:8px;">✅ 연결됨: ${S.settings.githubRepo}/reports/</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn btn-sm" onclick="manualReport('week')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 주 GitHub 저장</button>
+        <button class="btn btn-sm" onclick="manualReport('month')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 달 GitHub 저장</button>
+      </div>
+      <div style="font-size:11px;color:#aaa;margin-top:8px;">저장 경로: reports/weekly/YYYY-MM-DD.md(.csv)<br>reports/monthly/YYYY-MM.md(.csv)</div>
+    </div>
     <div class="card" style="border:1px solid #fdedec;">
       <div class="card-title" style="color:#e74c3c;">⚠️ 데이터 관리</div>
       <button class="btn btn-sm btn-red" onclick="resetWeek()" style="margin-bottom:8px;width:100%;">이번 주 피로도 초기화</button>
@@ -873,9 +1052,10 @@ function renderSettingsMain(){
 }
 
 // ─── CHORE DETAIL (설정 서브뷰) ───
-function openChoreDetail(id){
+function openChoreDetail(id, from){
   S.settingsView='chore-detail';
   S.choreDetailId=id;
+  S.choreDetailFrom=from||'main';
   renderSettings();
 }
 
@@ -886,7 +1066,7 @@ function renderChoreDetail(){
   S.selChoreEmoji=c.emoji;
 
   document.getElementById('settingsContent').innerHTML=`
-    <button class="back-btn" onclick="goSettingsMain()">← 목록으로 돌아가기</button>
+    <button class="back-btn" onclick="${S.choreDetailFrom==='chore-list'?'openChoreList':'goSettingsMain'}()">← ${S.choreDetailFrom==='chore-list'?'목록으로 돌아가기':'설정으로 돌아가기'}</button>
     <div class="card">
       <div class="card-title">🔍 집안일 상세 정보</div>
       <div style="text-align:center;font-size:48px;margin:8px 0;">${c.emoji}</div>
@@ -916,6 +1096,67 @@ function renderChoreDetail(){
   `;
 }
 
+// ─── CHORE LIST (설정 서브뷰) ───
+function renderChoreList(){
+  const isAdmin=S.loggedIn?.isAdmin;
+  const byCategory = {};
+  Object.keys(CATEGORIES).filter(k=>k!=='all').forEach(k=>{ byCategory[k]=[]; });
+  S.chores.forEach(c=>{ if(byCategory[c.category]) byCategory[c.category].push(c); else byCategory['house'].push(c); });
+
+  const listHtml = Object.entries(byCategory).map(([cat,chores])=>{
+    if(!chores.length) return '';
+    return `<div style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:bold;color:#667eea;margin-bottom:6px;padding:4px 0;border-bottom:1px solid #eee;">${CATEGORIES[cat]}</div>
+      ${chores.map(c=>`
+        <button class="chore-btn" onclick="openChoreDetail('${c.id}','chore-list')">
+          <span style="font-size:19px;">${c.emoji}</span>
+          <div style="flex:1;">
+            <div style="font-weight:bold;font-size:13px;">${c.name}</div>
+            <div style="font-size:11px;color:#888;">피로도 💦${c.fatigue} · +${c.xp}XP</div>
+          </div>
+          <span style="color:#aaa;font-size:18px;">›</span>
+        </button>`).join('')}
+    </div>`;
+  }).join('');
+
+  document.getElementById('settingsContent').innerHTML=`
+    <button class="back-btn" onclick="goSettingsMain()">← 설정으로 돌아가기</button>
+    <div class="card">
+      <div class="card-title">🧹 집안일 목록 (${S.chores.length}개)</div>
+      ${listHtml||'<p class="empty-msg">항목이 없어요.</p>'}
+      ${isAdmin?`<div style="margin-top:8px;border-top:1px solid #eee;padding-top:12px;">
+        <div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:8px;">➕ 새 항목 추가</div>
+        <div class="emoji-grid" id="choreEmojiPicker">${CHORE_EMOJIS.map(e=>`<button class="emoji-btn${S.selChoreEmoji===e?' sel':''}" onclick="selChoreEmoji('${e}')">${e}</button>`).join('')}</div>
+        <input type="text" id="newChoreName" placeholder="이름">
+        <select id="newChoreCategory">
+          <option value="house">🏠 집안일</option>
+          <option value="care">👶 육아</option>
+          <option value="pet">🐱 반려동물</option>
+        </select>
+        <select id="newChoreFatigue">
+          <option value="1">피로도 1 — 아주 쉬움</option>
+          <option value="2" selected>피로도 2 — 쉬움</option>
+          <option value="3">피로도 3 — 보통</option>
+          <option value="4">피로도 4 — 힘듦</option>
+          <option value="5">피로도 5 — 매우 힘듦</option>
+        </select>
+        <button class="btn btn-primary" onclick="addChoreFromList()" style="margin-top:0;">추가하기</button>
+      </div>`:'<div style="font-size:12px;color:#aaa;text-align:center;padding:8px;">항목 추가/수정은 관리자만 가능합니다.</div>'}
+    </div>
+  `;
+}
+
+function addChoreFromList(){
+  if(!requireAdmin()) return;
+  const name=document.getElementById('newChoreName')?.value.trim();
+  const fatigue=parseInt(document.getElementById('newChoreFatigue')?.value||'2');
+  const category=document.getElementById('newChoreCategory')?.value||'house';
+  if(!name){ alert('이름을 입력해주세요!'); return; }
+  S.chores.push({id:'cu'+Date.now(), name, emoji:S.selChoreEmoji, fatigue, xp:fatigue*10, category});
+  S.selChoreEmoji='🍽️';
+  persist(); renderChoreList();
+}
+
 function selChoreDetailEmoji(e){
   S.selChoreEmoji=e;
   document.querySelectorAll('#choreDetailEmojiGrid .emoji-btn').forEach(b=>b.classList.toggle('sel',b.textContent===e));
@@ -932,7 +1173,7 @@ function saveChoreDetail(id){
   c.xp       = c.fatigue*10;
   persist();
   alert('저장됐어요! ✅');
-  goSettingsMain();
+  S.choreDetailFrom==='chore-list' ? openChoreList() : goSettingsMain();
 }
 
 // ═══════════════════════════════════════
@@ -957,7 +1198,8 @@ function removeChore(id){
   if(!confirm('이 항목을 삭제할까요?')) return;
   S.chores=S.chores.filter(c=>c.id!==id);
   if(S.selChoreId===id) S.selChoreId=null;
-  persist(); goSettingsMain();
+  persist();
+  S.choreDetailFrom==='chore-list' ? openChoreList() : goSettingsMain();
 }
 
 function addMember(){
@@ -1097,6 +1339,244 @@ function confetti(){
   }
   setTimeout(()=>c.remove(), 3500);
 }
+
+// ═══════════════════════════════════════
+//  REPORTING (주간 / 월간 보고서 & GitHub)
+// ═══════════════════════════════════════
+
+function weekLabel(ts){
+  const d=new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function monthLabel(ts){
+  const d=new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function fmtDate(ts){ return new Date(ts).toLocaleDateString('ko-KR'); }
+function fmtTime(ts){
+  const d=new Date(ts);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function generateMD(startTs, endTs, title){
+  const h=S.history.filter(x=>x.timestamp>=startTs&&x.timestamp<endTs);
+  const bh=S.badgeHistory.filter(x=>x.timestamp>=startTs&&x.timestamp<endTs);
+  const doers=S.members.filter(m=>m.id!=='jerry'&&m.id!=='tori');
+
+  let md=`# 🏠 우리 집 히어로 보고서\n\n`;
+  md+=`**${title}**  \n`;
+  md+=`**기간:** ${fmtDate(startTs)} ~ ${fmtDate(endTs-1)}\n\n---\n\n`;
+  md+=`## 📊 가족 활동 요약\n\n`;
+  md+=`| 이름 | 완료 | XP | 피로도 | 뱃지 |\n|------|------|-----|--------|------|\n`;
+  doers.forEach(m=>{
+    const mh=h.filter(x=>x.memberId===m.id);
+    const xp=mh.reduce((s,x)=>s+x.xpEarned,0);
+    const fat=mh.reduce((s,x)=>s+x.fatigueAdded,0);
+    const badges=bh.filter(x=>x.memberId===m.id).map(x=>x.emoji+x.name).join(' ');
+    md+=`| ${m.emoji} ${m.name} | ${mh.length}건 | ${xp} | ${fat} | ${badges||'-'} |\n`;
+  });
+  md+=`\n## 📋 상세 기록\n\n`;
+  const byDate={};
+  h.forEach(entry=>{
+    const dk=fmtDate(entry.timestamp);
+    if(!byDate[dk]) byDate[dk]=[];
+    byDate[dk].push(entry);
+  });
+  Object.entries(byDate).sort().forEach(([date,entries])=>{
+    md+=`### ${date}\n\n`;
+    entries.forEach(entry=>{
+      const m=member(entry.memberId), c=S.chores.find(x=>x.id===entry.choreId);
+      if(!m||!c) return;
+      md+=`- ${fmtTime(entry.timestamp)} | ${m.emoji} **${m.name}** | ${c.emoji} ${c.name} | +${entry.xpEarned}XP | 💦${entry.fatigueAdded}\n`;
+    });
+    md+=`\n`;
+  });
+  if(bh.length){
+    md+=`## 🏅 획득 뱃지\n\n`;
+    bh.forEach(b=>{
+      const m=member(b.memberId); if(!m) return;
+      md+=`- ${fmtDate(b.timestamp)} | ${m.emoji} **${m.name}** | ${b.emoji} ${b.name}\n`;
+    });
+    md+=`\n`;
+  }
+  md+=`---\n*생성: ${new Date().toLocaleString('ko-KR')}*\n`;
+  return md;
+}
+
+function generateCSV(startTs, endTs){
+  const h=S.history.filter(x=>x.timestamp>=startTs&&x.timestamp<endTs);
+  const BOM='﻿';
+  const header='날짜,시간,이름,카테고리,항목,피로도,XP';
+  const rows=h.map(entry=>{
+    const m=member(entry.memberId), c=S.chores.find(x=>x.id===entry.choreId);
+    if(!m||!c) return null;
+    const catLabel={house:'집안일',care:'육아',pet:'반려동물',child:'자녀'}[c.category]||c.category;
+    return [fmtDate(entry.timestamp),fmtTime(entry.timestamp),m.name,catLabel,c.name,c.fatigue,entry.xpEarned].join(',');
+  }).filter(Boolean);
+  return BOM+header+'\n'+rows.join('\n');
+}
+
+function downloadFile(content, filename, mime){
+  const blob=new Blob([content],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function ghPush(path, content, message){
+  const token=S.settings.githubToken, repo=S.settings.githubRepo;
+  if(!token||!repo) return false;
+  const url=`https://api.github.com/repos/${repo}/contents/${path}`;
+  const hdrs={'Authorization':`Bearer ${token}`,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'};
+  let sha=null;
+  try{ const r=await fetch(url,{headers:hdrs}); if(r.ok){const d=await r.json();sha=d.sha;} }catch(e){}
+  const encoded=btoa(unescape(encodeURIComponent(content)));
+  const body={message,content:encoded};
+  if(sha) body.sha=sha;
+  const r=await fetch(url,{method:'PUT',headers:hdrs,body:JSON.stringify(body)});
+  return r.ok;
+}
+
+async function saveWeeklyReport(startTs, endTs){
+  const lbl=weekLabel(startTs);
+  const md=generateMD(startTs,endTs,`주간 보고서 (${fmtDate(startTs)} ~ ${fmtDate(endTs-1)})`);
+  const csv=generateCSV(startTs,endTs);
+  const [a,b]=await Promise.all([
+    ghPush(`reports/weekly/${lbl}.md`,md,`📊 주간 보고서 ${lbl}`),
+    ghPush(`reports/weekly/${lbl}.csv`,csv,`📊 주간 데이터 ${lbl}`),
+  ]);
+  return a&&b;
+}
+
+async function saveMonthlyReport(year, month){
+  const startTs=new Date(year,month,1).getTime();
+  const endTs=new Date(year,month+1,1).getTime();
+  const lbl=monthLabel(startTs);
+  const md=generateMD(startTs,endTs,`월간 보고서 ${lbl}`);
+  const csv=generateCSV(startTs,endTs);
+  const [a,b]=await Promise.all([
+    ghPush(`reports/monthly/${lbl}.md`,md,`📊 월간 보고서 ${lbl}`),
+    ghPush(`reports/monthly/${lbl}.csv`,csv,`📊 월간 데이터 ${lbl}`),
+  ]);
+  return a&&b;
+}
+
+async function checkAutoReport(){
+  if(!S.settings.githubToken||!S.settings.githubRepo) return;
+  const ws=weekStart();
+  const today=new Date();
+  const ms=new Date(today.getFullYear(),today.getMonth(),1).getTime();
+  // 이전 주 자동 저장
+  if(ws>(S.settings.lastWeeklyReport||0)){
+    const ok=await saveWeeklyReport(ws-7*24*60*60*1000,ws);
+    if(ok){S.settings.lastWeeklyReport=ws; persist();}
+  }
+  // 이전 달 자동 저장
+  if(ms>(S.settings.lastMonthlyReport||0)){
+    const pm=today.getMonth()===0?11:today.getMonth()-1;
+    const py=today.getMonth()===0?today.getFullYear()-1:today.getFullYear();
+    const ok=await saveMonthlyReport(py,pm);
+    if(ok){S.settings.lastMonthlyReport=ms; persist();}
+  }
+}
+
+function saveGithubSettings(){
+  if(!requireAdmin()) return;
+  S.settings.githubRepo=document.getElementById('ghRepo')?.value.trim()||'';
+  S.settings.githubToken=document.getElementById('ghToken')?.value.trim()||'';
+  persist(); alert('GitHub 설정이 저장됐어요! ✅'); renderSettings();
+}
+
+async function manualReport(type){
+  if(!S.settings.githubToken||!S.settings.githubRepo){ alert('GitHub 설정을 먼저 입력해주세요!'); return; }
+  const btn=event.currentTarget; const orig=btn.textContent;
+  btn.textContent='저장 중...'; btn.disabled=true;
+  let ok=false;
+  if(type==='week'){
+    const ws=weekStart();
+    ok=await saveWeeklyReport(ws,ws+7*24*60*60*1000);
+  } else {
+    const d=new Date(); ok=await saveMonthlyReport(d.getFullYear(),d.getMonth());
+  }
+  btn.disabled=false; btn.textContent=orig;
+  alert(ok?`GitHub에 저장됐어요! ✅\n저장소: ${S.settings.githubRepo}/reports/`:'저장 실패 😢 토큰과 저장소명을 확인해주세요.');
+}
+
+function downloadReport(type){
+  const now=new Date();
+  if(type==='week'){
+    const ws=weekStart();
+    const lbl=weekLabel(ws);
+    downloadFile(generateCSV(ws,ws+7*24*60*60*1000),`${lbl}-weekly.csv`,'text/csv;charset=utf-8;');
+    downloadFile(generateMD(ws,ws+7*24*60*60*1000,`주간 보고서 ${lbl}`),`${lbl}-weekly.md`,'text/markdown;charset=utf-8;');
+  } else {
+    const startTs=new Date(now.getFullYear(),now.getMonth(),1).getTime();
+    const endTs=new Date(now.getFullYear(),now.getMonth()+1,1).getTime();
+    const lbl=monthLabel(startTs);
+    downloadFile(generateCSV(startTs,endTs),`${lbl}-monthly.csv`,'text/csv;charset=utf-8;');
+    downloadFile(generateMD(startTs,endTs,`월간 보고서 ${lbl}`),`${lbl}-monthly.md`,'text/markdown;charset=utf-8;');
+  }
+}
+
+// ═══════════════════════════════════════
+//  KAKAO 일일 요약
+// ═══════════════════════════════════════
+function getDailySummary(){
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dateISO = now.toISOString().split('T')[0];
+
+  const tasks = S.history
+    .filter(h => h.timestamp >= todayStart)
+    .map(h => {
+      const m = member(h.memberId);
+      const c = S.chores.find(x => x.id === h.choreId);
+      return {
+        memberName:  m?.name  || '?',
+        memberEmoji: m?.emoji || '❓',
+        choreName:   c?.name  || '?',
+        choreEmoji:  c?.emoji || '❓',
+        xp:     h.xpGained   || 0,
+        time:   new Date(h.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
+      };
+    });
+
+  const messages = S.messages
+    .filter(msg => msg.timestamp >= todayStart)
+    .map(msg => {
+      const fromM = member(msg.fromId);
+      const toM   = msg.toId ? member(msg.toId) : null;
+      return {
+        from:      fromM?.name  || msg.fromId,
+        fromEmoji: fromM?.emoji || '👤',
+        to:        toM?.name    || '전체',
+        text:      msg.text,
+        time:      new Date(msg.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
+      };
+    });
+
+  return { date: dateISO, tasks, messages };
+}
+
+function downloadDailySummary(){
+  const summary = getDailySummary();
+  downloadFile(JSON.stringify(summary, null, 2), 'daily_summary.json', 'application/json;charset=utf-8;');
+  alert('📤 오늘 요약이 저장됐어요!\n\ndownloads 폴더의 daily_summary.json 파일을\nForHouse 폴더로 옮긴 후\nsend_kakao.ps1 을 실행하면 카카오톡으로 발송됩니다.');
+}
+
+// 자정 자동 저장
+(function setupMidnightExport(){
+  let lastDay = new Date().getDate();
+  setInterval(()=>{
+    if(!S.loggedIn) return;
+    const today = new Date().getDate();
+    if(today !== lastDay){
+      lastDay = today;
+      downloadDailySummary();
+    }
+  }, 60000);
+})();
 
 // ═══════════════════════════════════════
 //  INIT
