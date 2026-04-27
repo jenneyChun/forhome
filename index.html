@@ -1197,10 +1197,34 @@ function confetti(){
 }
 
 // ═══════════════════════════════════════
+//  AUTO SYNC (오전 6시, 오후 6시)
+// ═══════════════════════════════════════
+function scheduleAutoSync(){
+  const syncHours = [6, 18];
+  const now = new Date();
+  let msUntilNext = Infinity;
+  for(const h of syncHours){
+    const next = new Date(now);
+    next.setHours(h, 0, 0, 0);
+    let ms = next - now;
+    if(ms <= 0) ms += 24 * 60 * 60 * 1000;
+    if(ms < msUntilNext) msUntilNext = ms;
+  }
+  setTimeout(async () => {
+    if(S.loggedIn){
+      await loadFromGitHub();
+      refreshCurrentTab();
+    }
+    scheduleAutoSync();
+  }, msUntilNext);
+}
+
+// ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
 (async () => {
   await loadFromGitHub();
+  scheduleAutoSync();
   if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
     showMain();
   } else {
