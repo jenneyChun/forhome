@@ -1,0 +1,38 @@
+{
+  "date": "2026-04-28",
+  "tasks": [
+    {
+      "memberName": "엄마",
+      "memberEmoji": "👩",
+      "choreName": "설거지",
+      "choreEmoji": "🍽️",
+      "xp": 20,
+      "time": "09:30"
+    },
+    {
+      "memberName": "엄마",
+      "memberEmoji": "👩",
+      "choreName": "빨래 돌리기",
+      "choreEmoji": "🧺",
+      "xp": 20,
+      "time": "10:15"
+    },
+    {
+      "memberName": "아빠",
+      "memberEmoji": "👨",
+      "choreName": "장보기",
+      "choreEmoji": "🛒",
+      "xp": 40,
+      "time": "14:00"
+    }
+  ],
+  "messages": [
+    {
+      "from": "엄마",
+      "fromEmoji": "👩",
+      "to": "아빠",
+      "text": "오늘도 수고했어요! 💕",
+      "time": "21:00"
+    }
+  ]
+}
