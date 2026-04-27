@@ -135,9 +135,6 @@ textarea{resize:vertical;min-height:70px;}
 .confetti-container{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;}
 .confetti-piece{position:absolute;border-radius:2px;animation:confettiFall linear forwards;}
 </style>
-<!-- Firebase SDK -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -163,7 +160,10 @@ textarea{resize:vertical;min-height:70px;}
 <div class="app" id="mainApp" style="display:none;">
   <div class="header">
     <h1>🏠 우리 집 히어로</h1>
-    <div class="header-user" onclick="confirmLogout()" id="headerUser"></div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="syncBtn" onclick="syncFromGitHub()" style="background:rgba(255,255,255,.2);border:none;border-radius:20px;color:white;padding:5px 10px;font-size:13px;cursor:pointer;" title="최신 데이터 가져오기">🔄</button>
+      <div class="header-user" onclick="confirmLogout()" id="headerUser"></div>
+    </div>
   </div>
   <nav class="nav">
     <button class="nav-btn active" onclick="showTab('home')"><span class="ic">🏠</span>홈</button>
@@ -250,18 +250,12 @@ textarea{resize:vertical;min-height:70px;}
 </div>
 
 <script>
-// ★ Firebase 설정 — console.firebase.google.com에서 복사한 값으로 교체하세요
-const firebaseConfig = {
-  apiKey: "여기에_붙여넣기",
-  authDomain: "여기에_붙여넣기",
-  projectId: "여기에_붙여넣기",
-  storageBucket: "여기에_붙여넣기",
-  messagingSenderId: "여기에_붙여넣기",
-  appId: "여기에_붙여넣기"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const STATE_DOC = db.collection('state').doc('forhouseData');
+// ★ GitHub 설정 — GH_TOKEN을 실제 Personal Access Token으로 교체하세요
+//   토큰 발급: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+//   권한: Contents (Read and Write), 대상 저장소: cejingme/forhome
+const GH_TOKEN  = '여기에_GitHub_토큰_입력';
+const GH_API_URL = 'https://api.github.com/repos/cejingme/forhome/contents/data.json';
+let ghFileSha = null;
 
 // ═══════════════════════════════════════
 //  CONSTANTS
@@ -399,27 +393,47 @@ function applyMigration(){
   });
 }
 
-async function loadFromFirestore(){
+function ghHeaders(){
+  return {
+    'Authorization': `token ${GH_TOKEN}`,
+    'Accept': 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json',
+  };
+}
+function toBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
+function fromBase64(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
+
+async function loadFromGitHub(){
+  // 로그인 세션은 이 기기의 localStorage에서 먼저 복원
   try{
-    const doc = await STATE_DOC.get();
-    if(doc.exists){
-      const p = doc.data();
-      S.accounts  = p.accounts  || initAccounts();
-      S.members   = p.members   || initMembers();
-      S.chores    = p.chores    || [...DEFAULT_CHORES];
-      S.history   = p.history   || [];
-      S.messages  = p.messages  || [];
-      S.settings  = p.settings  || {vacationThreshold:25};
-      S.loggedIn  = p.loggedIn  || null;
-      applyMigration();
-    } else {
+    const local = JSON.parse(localStorage.getItem('houseHeroV3')||'{}');
+    S.loggedIn = local.loggedIn || null;
+  }catch(e){}
+
+  try{
+    const res = await fetch(GH_API_URL, {headers: ghHeaders()});
+    if(res.status === 404){
+      // 첫 실행 — 기본값으로 GitHub에 파일 생성
       S.accounts = initAccounts();
       S.members  = initMembers();
       S.chores   = [...DEFAULT_CHORES];
       await persist();
+      return;
     }
-  } catch(e){
-    console.warn('Firebase 오프라인, localStorage 사용:', e.message);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    ghFileSha = json.sha;
+    const p = JSON.parse(fromBase64(json.content));
+    S.accounts = p.accounts || initAccounts();
+    S.members  = p.members  || initMembers();
+    S.chores   = p.chores   || [...DEFAULT_CHORES];
+    S.history  = p.history  || [];
+    S.messages = p.messages || [];
+    S.settings = p.settings || {vacationThreshold:25};
+    applyMigration();
+    localStorage.setItem('houseHeroV3', JSON.stringify({...p, loggedIn:S.loggedIn}));
+  }catch(e){
+    console.warn('GitHub 로드 실패, localStorage 사용:', e.message);
     loadFromLocal();
   }
 }
@@ -432,16 +446,29 @@ function initMembers(){
 }
 
 async function persist(){
+  // loggedIn은 기기별 세션이므로 GitHub에는 저장하지 않음
   const data = {
     accounts:S.accounts, members:S.members, chores:S.chores,
     history:S.history, messages:S.messages, settings:S.settings,
-    loggedIn:S.loggedIn,
   };
+  localStorage.setItem('houseHeroV3', JSON.stringify({...data, loggedIn:S.loggedIn}));
   try{
-    localStorage.setItem('houseHeroV3', JSON.stringify(data));
-    await STATE_DOC.set(data);
+    const body = {
+      message: '데이터 업데이트',
+      content: toBase64(JSON.stringify(data)),
+    };
+    if(ghFileSha) body.sha = ghFileSha;
+    const res = await fetch(GH_API_URL, {method:'PUT', headers:ghHeaders(), body:JSON.stringify(body)});
+    if(res.status === 409){
+      // SHA 충돌 — 최신 SHA 다시 받아서 재시도
+      const cur = await fetch(GH_API_URL, {headers:ghHeaders()});
+      if(cur.ok){ ghFileSha = (await cur.json()).sha; body.sha = ghFileSha; }
+      await fetch(GH_API_URL, {method:'PUT', headers:ghHeaders(), body:JSON.stringify(body)});
+    } else if(res.ok){
+      ghFileSha = (await res.json()).content.sha;
+    }
   }catch(e){
-    localStorage.setItem('houseHeroV3', JSON.stringify(data));
+    console.warn('GitHub 저장 실패:', e.message);
   }
 }
 
@@ -459,19 +486,13 @@ function refreshCurrentTab(){
   }
 }
 
-function startRealtimeSync(){
-  STATE_DOC.onSnapshot((doc) => {
-    if(!doc.exists || doc.metadata.hasPendingWrites) return;
-    const p = doc.data();
-    S.accounts = p.accounts || S.accounts;
-    S.members  = p.members  || S.members;
-    S.chores   = p.chores   || S.chores;
-    S.history  = p.history  || S.history;
-    S.messages = p.messages || S.messages;
-    S.settings = p.settings || S.settings;
-    localStorage.setItem('houseHeroV3', JSON.stringify(p));
-    if(S.loggedIn) refreshCurrentTab();
-  });
+async function syncFromGitHub(){
+  const btn = document.getElementById('syncBtn');
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  await loadFromGitHub();
+  if(S.loggedIn) refreshCurrentTab();
+  if(btn){ btn.textContent='🔄'; btn.disabled=false; }
+  alert('최신 데이터를 가져왔어요! ✅');
 }
 
 // ═══════════════════════════════════════
@@ -1179,8 +1200,7 @@ function confetti(){
 //  INIT
 // ═══════════════════════════════════════
 (async () => {
-  await loadFromFirestore();
-  startRealtimeSync();
+  await loadFromGitHub();
   if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
     showMain();
   } else {
