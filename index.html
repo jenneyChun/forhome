@@ -135,6 +135,9 @@ textarea{resize:vertical;min-height:70px;}
 .confetti-container{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;}
 .confetti-piece{position:absolute;border-radius:2px;animation:confettiFall linear forwards;}
 </style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -247,6 +250,19 @@ textarea{resize:vertical;min-height:70px;}
 </div>
 
 <script>
+// ★ Firebase 설정 — console.firebase.google.com에서 복사한 값으로 교체하세요
+const firebaseConfig = {
+  apiKey: "여기에_붙여넣기",
+  authDomain: "여기에_붙여넣기",
+  projectId: "여기에_붙여넣기",
+  storageBucket: "여기에_붙여넣기",
+  messagingSenderId: "여기에_붙여넣기",
+  appId: "여기에_붙여넣기"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const STATE_DOC = db.collection('state').doc('forhouseData');
+
 // ═══════════════════════════════════════
 //  CONSTANTS
 // ═══════════════════════════════════════
@@ -353,7 +369,7 @@ let S = {
   choreDetailId: null,
 };
 
-function load(){
+function loadFromLocal(){
   try{
     const d = localStorage.getItem('houseHeroV3');
     if(d){
@@ -373,11 +389,39 @@ function load(){
     S.accounts = initAccounts();
     S.members  = initMembers();
   }
-  // name migration
+  applyMigration();
+}
+
+function applyMigration(){
   S.members.forEach(m => {
     if(m.id==='jerry' && m.name.includes('블루')) m.name = '제리';
     if(m.id==='tori'  && m.name.includes('시니')) m.name = '또리';
   });
+}
+
+async function loadFromFirestore(){
+  try{
+    const doc = await STATE_DOC.get();
+    if(doc.exists){
+      const p = doc.data();
+      S.accounts  = p.accounts  || initAccounts();
+      S.members   = p.members   || initMembers();
+      S.chores    = p.chores    || [...DEFAULT_CHORES];
+      S.history   = p.history   || [];
+      S.messages  = p.messages  || [];
+      S.settings  = p.settings  || {vacationThreshold:25};
+      S.loggedIn  = p.loggedIn  || null;
+      applyMigration();
+    } else {
+      S.accounts = initAccounts();
+      S.members  = initMembers();
+      S.chores   = [...DEFAULT_CHORES];
+      await persist();
+    }
+  } catch(e){
+    console.warn('Firebase 오프라인, localStorage 사용:', e.message);
+    loadFromLocal();
+  }
 }
 
 function initAccounts(){ return DEFAULT_ACCOUNTS.map(a=>({...a})); }
@@ -387,14 +431,47 @@ function initMembers(){
   }));
 }
 
-function persist(){
+async function persist(){
+  const data = {
+    accounts:S.accounts, members:S.members, chores:S.chores,
+    history:S.history, messages:S.messages, settings:S.settings,
+    loggedIn:S.loggedIn,
+  };
   try{
-    localStorage.setItem('houseHeroV3', JSON.stringify({
-      accounts:S.accounts, members:S.members, chores:S.chores,
-      history:S.history, messages:S.messages, settings:S.settings,
-      loggedIn:S.loggedIn,
-    }));
-  }catch(e){}
+    localStorage.setItem('houseHeroV3', JSON.stringify(data));
+    await STATE_DOC.set(data);
+  }catch(e){
+    localStorage.setItem('houseHeroV3', JSON.stringify(data));
+  }
+}
+
+function refreshCurrentTab(){
+  const tabs = ['home','tasks','rankings','badges','settings'];
+  for(const tab of tabs){
+    if(document.getElementById('sec-'+tab)?.classList.contains('active')){
+      if(tab==='home')     renderHome();
+      if(tab==='tasks')    renderTasks();
+      if(tab==='rankings') renderRankings();
+      if(tab==='badges')   renderBadges();
+      if(tab==='settings') renderSettings();
+      return;
+    }
+  }
+}
+
+function startRealtimeSync(){
+  STATE_DOC.onSnapshot((doc) => {
+    if(!doc.exists || doc.metadata.hasPendingWrites) return;
+    const p = doc.data();
+    S.accounts = p.accounts || S.accounts;
+    S.members  = p.members  || S.members;
+    S.chores   = p.chores   || S.chores;
+    S.history  = p.history  || S.history;
+    S.messages = p.messages || S.messages;
+    S.settings = p.settings || S.settings;
+    localStorage.setItem('houseHeroV3', JSON.stringify(p));
+    if(S.loggedIn) refreshCurrentTab();
+  });
 }
 
 // ═══════════════════════════════════════
@@ -1101,13 +1178,16 @@ function confetti(){
 // ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
-load();
-if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
-  showMain();
-} else {
-  S.loggedIn=null;
-  document.getElementById('loginScreen').style.display='flex';
-}
+(async () => {
+  await loadFromFirestore();
+  startRealtimeSync();
+  if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
+    showMain();
+  } else {
+    S.loggedIn=null;
+    document.getElementById('loginScreen').style.display='flex';
+  }
+})();
 </script>
 </body>
 </html>
