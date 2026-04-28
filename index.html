@@ -161,10 +161,6 @@ textarea{resize:vertical;min-height:70px;}
            onkeydown="if(event.key==='Enter')doLogin()">
     <div class="login-err" id="loginErr"></div>
     <button class="btn-login" onclick="doLogin()">로그인 →</button>
-    <div class="login-hint">
-      엄마: mom / mom1234 &nbsp;|&nbsp; 아빠: dad / dad1234<br>
-      아들: son / son1234 &nbsp;|&nbsp; 관리자: admin / admin1234
-    </div>
   </div>
 </div>
 
@@ -172,7 +168,10 @@ textarea{resize:vertical;min-height:70px;}
 <div class="app" id="mainApp" style="display:none;">
   <div class="header">
     <h1>🏠 우리 집 히어로</h1>
-    <div class="header-user" onclick="confirmLogout()" id="headerUser"></div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="syncBtn" onclick="syncFromGitHub()" style="background:rgba(255,255,255,.2);border:none;border-radius:20px;color:white;padding:5px 10px;font-size:13px;cursor:pointer;" title="최신 데이터 가져오기">🔄</button>
+      <div class="header-user" onclick="confirmLogout()" id="headerUser"></div>
+    </div>
   </div>
   <nav class="nav">
     <button class="nav-btn active" onclick="showTab('home')"><span class="ic">🏠</span>홈</button>
@@ -255,6 +254,13 @@ textarea{resize:vertical;min-height:70px;}
 </div>
 
 <script>
+// ★ GitHub 설정 — GH_TOKEN을 실제 Personal Access Token으로 교체하세요
+//   토큰 발급: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+//   권한: Contents (Read and Write), 대상 저장소: cejingme/forhome
+const GH_TOKEN  = '여기에_GitHub_토큰_입력';
+const GH_API_URL = 'https://api.github.com/repos/cejingme/forhome/contents/data.json';
+let ghFileSha = null;
+
 // ═══════════════════════════════════════
 //  FIREBASE 초기화
 // ═══════════════════════════════════════
@@ -388,17 +394,30 @@ let S = {
   choreDetailFrom: 'main',
 };
 
-function _applyData(p){
-  S.accounts       = p.accounts       || initAccounts();
-  S.members        = p.members        || initMembers();
-  S.chores         = p.chores         || [...DEFAULT_CHORES];
-  S.history        = p.history        || [];
-  S.messages       = p.messages       || [];
-  S.settings       = p.settings       || {vacationThreshold:25};
-  S.badgeHistory   = p.badgeHistory   || [];
-  S.badgeResetWeek = p.badgeResetWeek || 0;
-  if(p.loggedIn !== undefined) S.loggedIn = p.loggedIn;
-  // 마이그레이션
+function loadFromLocal(){
+  try{
+    const d = localStorage.getItem('houseHeroV3');
+    if(d){
+      const p = JSON.parse(d);
+      S.accounts  = p.accounts  || initAccounts();
+      S.members   = p.members   || initMembers();
+      S.chores    = p.chores    || [...DEFAULT_CHORES];
+      S.history   = p.history   || [];
+      S.messages  = p.messages  || [];
+      S.settings  = p.settings  || {vacationThreshold:25};
+      S.loggedIn  = p.loggedIn  || null;
+    } else {
+      S.accounts = initAccounts();
+      S.members  = initMembers();
+    }
+  } catch(e) {
+    S.accounts = initAccounts();
+    S.members  = initMembers();
+  }
+  applyMigration();
+}
+
+function applyMigration(){
   S.members.forEach(m => {
     if(m.id==='jerry' && m.name.includes('블루')) m.name = '제리';
     if(m.id==='tori'  && m.name.includes('시니')) m.name = '또리';
@@ -431,6 +450,51 @@ async function load(){
   } catch(e){ console.warn('Firestore load 실패, localStorage 사용:', e); }
 }
 
+function ghHeaders(){
+  return {
+    'Authorization': `token ${GH_TOKEN}`,
+    'Accept': 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json',
+  };
+}
+function toBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
+function fromBase64(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
+
+async function loadFromGitHub(){
+  // 로그인 세션은 이 기기의 localStorage에서 먼저 복원
+  try{
+    const local = JSON.parse(localStorage.getItem('houseHeroV3')||'{}');
+    S.loggedIn = local.loggedIn || null;
+  }catch(e){}
+
+  try{
+    const res = await fetch(GH_API_URL, {headers: ghHeaders()});
+    if(res.status === 404){
+      // 첫 실행 — 기본값으로 GitHub에 파일 생성
+      S.accounts = initAccounts();
+      S.members  = initMembers();
+      S.chores   = [...DEFAULT_CHORES];
+      await persist();
+      return;
+    }
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    ghFileSha = json.sha;
+    const p = JSON.parse(fromBase64(json.content));
+    S.accounts = p.accounts || initAccounts();
+    S.members  = p.members  || initMembers();
+    S.chores   = p.chores   || [...DEFAULT_CHORES];
+    S.history  = p.history  || [];
+    S.messages = p.messages || [];
+    S.settings = p.settings || {vacationThreshold:25};
+    applyMigration();
+    localStorage.setItem('houseHeroV3', JSON.stringify({...p, loggedIn:S.loggedIn}));
+  }catch(e){
+    console.warn('GitHub 로드 실패, localStorage 사용:', e.message);
+    loadFromLocal();
+  }
+}
+
 function initAccounts(){ return DEFAULT_ACCOUNTS.map(a=>({...a})); }
 function initMembers(){
   return FIXED_MEMBERS.map(m=>({
@@ -438,28 +502,55 @@ function initMembers(){
   }));
 }
 
-function _firestoreData(){
-  return {
+async function persist(){
+  // loggedIn은 기기별 세션이므로 GitHub에는 저장하지 않음
+  const data = {
     accounts:S.accounts, members:S.members, chores:S.chores,
     history:S.history, messages:S.messages, settings:S.settings,
-    badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
   };
-}
-async function _saveToFirestore(){
+  localStorage.setItem('houseHeroV3', JSON.stringify({...data, loggedIn:S.loggedIn}));
   try{
-    _syncLock = true;
-    await _db.collection('app').doc('data').set(_firestoreData());
-    setTimeout(()=>{ _syncLock = false; }, 2000);
-  } catch(e){ _syncLock = false; console.warn('Firestore 저장 실패:', e); }
+    const body = {
+      message: '데이터 업데이트',
+      content: toBase64(JSON.stringify(data)),
+    };
+    if(ghFileSha) body.sha = ghFileSha;
+    const res = await fetch(GH_API_URL, {method:'PUT', headers:ghHeaders(), body:JSON.stringify(body)});
+    if(res.status === 409){
+      // SHA 충돌 — 최신 SHA 다시 받아서 재시도
+      const cur = await fetch(GH_API_URL, {headers:ghHeaders()});
+      if(cur.ok){ ghFileSha = (await cur.json()).sha; body.sha = ghFileSha; }
+      await fetch(GH_API_URL, {method:'PUT', headers:ghHeaders(), body:JSON.stringify(body)});
+    } else if(res.ok){
+      ghFileSha = (await res.json()).content.sha;
+    }
+  }catch(e){
+    console.warn('GitHub 저장 실패:', e.message);
+  }
 }
 
-function persist(){
-  // localStorage (즉시)
-  try{
-    localStorage.setItem('houseHeroV3', JSON.stringify({..._firestoreData(), loggedIn:S.loggedIn}));
-  }catch(e){}
-  // Firestore (비동기, 백그라운드)
-  _saveToFirestore();
+function refreshCurrentTab(){
+  const tabs = ['home','tasks','rankings','badges','settings'];
+  for(const tab of tabs){
+    if(document.getElementById('sec-'+tab)?.classList.contains('active')){
+      if(tab==='home')     renderHome();
+      if(tab==='tasks')    renderTasks();
+      if(tab==='rankings') renderRankings();
+      if(tab==='badges')   renderBadges();
+      if(tab==='settings') renderSettings();
+      return;
+    }
+  }
+}
+
+async function syncFromGitHub(){
+  const btn = document.getElementById('syncBtn');
+  if(btn){ btn.textContent='⏳'; btn.disabled=true; }
+  await loadFromGitHub();
+  if(S.loggedIn) refreshCurrentTab();
+  if(btn){ btn.textContent='🔄'; btn.disabled=false; }
+  alert('최신 데이터를 가져왔어요! ✅');
+
 }
 
 // ═══════════════════════════════════════
@@ -1370,6 +1461,41 @@ function confetti(){
 }
 
 // ═══════════════════════════════════════
+//  AUTO SYNC (오전 6시, 오후 6시)
+// ═══════════════════════════════════════
+function scheduleAutoSync(){
+  const syncHours = [6, 18];
+  const now = new Date();
+  let msUntilNext = Infinity;
+  for(const h of syncHours){
+    const next = new Date(now);
+    next.setHours(h, 0, 0, 0);
+    let ms = next - now;
+    if(ms <= 0) ms += 24 * 60 * 60 * 1000;
+    if(ms < msUntilNext) msUntilNext = ms;
+  }
+  setTimeout(async () => {
+    if(S.loggedIn){
+      await loadFromGitHub();
+      refreshCurrentTab();
+    }
+    scheduleAutoSync();
+  }, msUntilNext);
+}
+
+// ═══════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════
+(async () => {
+  await loadFromGitHub();
+  scheduleAutoSync();
+  if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
+    showMain();
+  } else {
+    S.loggedIn=null;
+    document.getElementById('loginScreen').style.display='flex';
+  }
+=======
 //  REPORTING (주간 / 월간 보고서 & GitHub)
 // ═══════════════════════════════════════
 
@@ -1555,6 +1681,7 @@ function downloadDailySummary(){
     if(active === 'sec-badges')   renderBadges();
     if(active === 'sec-settings') renderSettings();
   });
+
 })();
 </script>
 </body>
