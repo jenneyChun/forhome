@@ -144,6 +144,9 @@ textarea{resize:vertical;min-height:70px;}
 .confetti-container{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;}
 .confetti-piece{position:absolute;border-radius:2px;animation:confettiFall linear forwards;}
 </style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -252,6 +255,21 @@ textarea{resize:vertical;min-height:70px;}
 </div>
 
 <script>
+// ═══════════════════════════════════════
+//  FIREBASE 초기화
+// ═══════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "AIzaSyCExIizXG3OitWMXBElM7RDMqT6jTKS-xE",
+  authDomain:        "forhome-19317.firebaseapp.com",
+  projectId:         "forhome-19317",
+  storageBucket:     "forhome-19317.firebasestorage.app",
+  messagingSenderId: "598577686461",
+  appId:             "1:598577686461:web:248472a3ce70800f4354d4",
+};
+firebase.initializeApp(firebaseConfig);
+const _db = firebase.firestore();
+let _syncLock = false; // Firestore 쓰기 중 onSnapshot 무시용
+
 // ═══════════════════════════════════════
 //  CONSTANTS
 // ═══════════════════════════════════════
@@ -370,37 +388,47 @@ let S = {
   choreDetailFrom: 'main',
 };
 
-function load(){
-  try{
-    const d = localStorage.getItem('houseHeroV3');
-    if(d){
-      const p = JSON.parse(d);
-      S.accounts       = p.accounts       || initAccounts();
-      S.members        = p.members        || initMembers();
-      S.chores         = p.chores         || [...DEFAULT_CHORES];
-      S.history        = p.history        || [];
-      S.messages       = p.messages       || [];
-      S.settings       = p.settings       || {vacationThreshold:25};
-      S.loggedIn       = p.loggedIn       || null;
-      S.badgeHistory   = p.badgeHistory   || [];
-      S.badgeResetWeek = p.badgeResetWeek || 0;
-    } else {
-      S.accounts = initAccounts();
-      S.members  = initMembers();
-    }
-  } catch(e) {
-    S.accounts = initAccounts();
-    S.members  = initMembers();
-  }
-  // name migration
+function _applyData(p){
+  S.accounts       = p.accounts       || initAccounts();
+  S.members        = p.members        || initMembers();
+  S.chores         = p.chores         || [...DEFAULT_CHORES];
+  S.history        = p.history        || [];
+  S.messages       = p.messages       || [];
+  S.settings       = p.settings       || {vacationThreshold:25};
+  S.badgeHistory   = p.badgeHistory   || [];
+  S.badgeResetWeek = p.badgeResetWeek || 0;
+  if(p.loggedIn !== undefined) S.loggedIn = p.loggedIn;
+  // 마이그레이션
   S.members.forEach(m => {
     if(m.id==='jerry' && m.name.includes('블루')) m.name = '제리';
     if(m.id==='tori'  && m.name.includes('시니')) m.name = '또리';
   });
-  // chore migration: add any new default chores not yet in saved data
   DEFAULT_CHORES.forEach(dc=>{ if(!S.chores.find(c=>c.id===dc.id)) S.chores.push(dc); });
-  // account migration: add son account if missing
   DEFAULT_ACCOUNTS.forEach(da=>{ if(!S.accounts.find(a=>a.id===da.id)) S.accounts.push({...da}); });
+}
+
+async function load(){
+  // 1. localStorage 먼저 (빠른 초기 렌더용)
+  try{
+    const d = localStorage.getItem('houseHeroV3');
+    if(d) _applyData(JSON.parse(d));
+    else { S.accounts = initAccounts(); S.members = initMembers(); }
+  } catch(e){ S.accounts = initAccounts(); S.members = initMembers(); }
+
+  // 2. Firestore에서 최신 데이터 덮어쓰기
+  try{
+    const snap = await _db.collection('app').doc('data').get();
+    if(snap.exists){
+      const p = snap.data();
+      const loggedIn = S.loggedIn; // 로그인 정보는 기기별로 유지
+      _applyData(p);
+      S.loggedIn = loggedIn;
+      localStorage.setItem('houseHeroV3', JSON.stringify({...p, loggedIn: S.loggedIn}));
+    } else {
+      // 최초 실행 — localStorage 데이터를 Firestore에 올림
+      await _saveToFirestore();
+    }
+  } catch(e){ console.warn('Firestore load 실패, localStorage 사용:', e); }
 }
 
 function initAccounts(){ return DEFAULT_ACCOUNTS.map(a=>({...a})); }
@@ -410,14 +438,28 @@ function initMembers(){
   }));
 }
 
-function persist(){
+function _firestoreData(){
+  return {
+    accounts:S.accounts, members:S.members, chores:S.chores,
+    history:S.history, messages:S.messages, settings:S.settings,
+    badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
+  };
+}
+async function _saveToFirestore(){
   try{
-    localStorage.setItem('houseHeroV3', JSON.stringify({
-      accounts:S.accounts, members:S.members, chores:S.chores,
-      history:S.history, messages:S.messages, settings:S.settings,
-      loggedIn:S.loggedIn, badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
-    }));
+    _syncLock = true;
+    await _db.collection('app').doc('data').set(_firestoreData());
+    setTimeout(()=>{ _syncLock = false; }, 2000);
+  } catch(e){ _syncLock = false; console.warn('Firestore 저장 실패:', e); }
+}
+
+function persist(){
+  // localStorage (즉시)
+  try{
+    localStorage.setItem('houseHeroV3', JSON.stringify({..._firestoreData(), loggedIn:S.loggedIn}));
   }catch(e){}
+  // Firestore (비동기, 백그라운드)
+  _saveToFirestore();
 }
 
 // ═══════════════════════════════════════
@@ -1489,13 +1531,31 @@ function downloadDailySummary(){
 // ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
-load();
-if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
-  showMain();
-} else {
-  S.loggedIn=null;
-  document.getElementById('loginScreen').style.display='flex';
-}
+(async function init(){
+  await load();
+
+  if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
+    showMain();
+  } else {
+    S.loggedIn = null;
+    document.getElementById('loginScreen').style.display='flex';
+  }
+
+  // 실시간 동기화 — 다른 기기의 변경사항을 자동 반영
+  _db.collection('app').doc('data').onSnapshot(snap => {
+    if(!snap.exists || _syncLock) return;
+    const loggedIn = S.loggedIn;
+    _applyData(snap.data());
+    S.loggedIn = loggedIn;
+    // 현재 열린 탭 다시 렌더링
+    const active = document.querySelector('.sec.active')?.id;
+    if(active === 'sec-home')     renderHome();
+    if(active === 'sec-tasks')    renderTasks();
+    if(active === 'sec-rankings') renderRankings();
+    if(active === 'sec-badges')   renderBadges();
+    if(active === 'sec-settings') renderSettings();
+  });
+})();
 </script>
 </body>
 </html>
