@@ -251,7 +251,24 @@ textarea{resize:vertical;min-height:70px;}
   </div>
 </div>
 
+<!-- Firebase compat SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
 <script>
+// ── Firebase 초기화 ──────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCExIizXG3OitWMXBElM7RDMqT6jTKS-xE",
+  authDomain: "forhome-19317.firebaseapp.com",
+  projectId: "forhome-19317",
+  storageBucket: "forhome-19317.firebasestorage.app",
+  messagingSenderId: "598577686461",
+  appId: "1:598577686461:web:248472a3ce70800f4354d4"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const DOC_REF = db.collection('family').doc('data');
+
 // ═══════════════════════════════════════
 //  CONSTANTS
 // ═══════════════════════════════════════
@@ -353,7 +370,7 @@ let S = {
   chores: [...DEFAULT_CHORES],
   history: [],
   messages: [],
-  settings: {vacationThreshold:25, githubRepo:'', githubToken:'', lastWeeklyReport:0, lastMonthlyReport:0},
+  settings: {vacationThreshold:25, githubRepo:'', githubToken:'', lastWeeklyReport:0, lastMonthlyReport:0, kakaoRestApiKey:'', kakaoClientSecret:'', kakaoRefreshToken:''},
   loggedIn: null, // {accountId, memberId, isAdmin}
   // UI
   selMemberId: null,
@@ -365,16 +382,17 @@ let S = {
   selChoreEmoji: '🍽️',
   badgeHistory: [],
   badgeResetWeek: 0,
-  settingsView: 'main', // 'main' | 'chore-list' | 'chore-detail'
+  settingsView: 'main', // 'main' | 'section' | 'chore-list' | 'chore-detail'
+  settingsSection: null, // 'family' | 'chore-mgmt' | 'add-member' | 'accounts' | 'app' | 'report' | 'kakao' | 'github' | 'data'
   choreDetailId: null,
   choreDetailFrom: 'main',
 };
 
-function load(){
+async function load(){
   try{
-    const d = localStorage.getItem('houseHeroV3');
-    if(d){
-      const p = JSON.parse(d);
+    const snap = await DOC_REF.get();
+    const p = snap.exists ? snap.data() : null;
+    if(p){
       S.accounts       = p.accounts       || initAccounts();
       S.members        = p.members        || initMembers();
       S.chores         = p.chores         || [...DEFAULT_CHORES];
@@ -389,17 +407,20 @@ function load(){
       S.members  = initMembers();
     }
   } catch(e) {
-    S.accounts = initAccounts();
-    S.members  = initMembers();
+    // Firestore 실패 시 localStorage 로 폴백
+    try{
+      const d = localStorage.getItem('houseHeroV3');
+      if(d){ const p=JSON.parse(d); Object.assign(S,p); }
+    }catch(_){}
+    if(!S.accounts) S.accounts = initAccounts();
+    if(!S.members)  S.members  = initMembers();
   }
   // name migration
   S.members.forEach(m => {
     if(m.id==='jerry' && m.name.includes('블루')) m.name = '제리';
     if(m.id==='tori'  && m.name.includes('시니')) m.name = '또리';
   });
-  // chore migration: add any new default chores not yet in saved data
   DEFAULT_CHORES.forEach(dc=>{ if(!S.chores.find(c=>c.id===dc.id)) S.chores.push(dc); });
-  // account migration: add son account if missing
   DEFAULT_ACCOUNTS.forEach(da=>{ if(!S.accounts.find(a=>a.id===da.id)) S.accounts.push({...da}); });
 }
 
@@ -411,13 +432,15 @@ function initMembers(){
 }
 
 function persist(){
-  try{
-    localStorage.setItem('houseHeroV3', JSON.stringify({
-      accounts:S.accounts, members:S.members, chores:S.chores,
-      history:S.history, messages:S.messages, settings:S.settings,
-      loggedIn:S.loggedIn, badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
-    }));
-  }catch(e){}
+  const data = {
+    accounts:S.accounts, members:S.members, chores:S.chores,
+    history:S.history, messages:S.messages, settings:S.settings,
+    loggedIn:S.loggedIn, badgeHistory:S.badgeHistory, badgeResetWeek:S.badgeResetWeek,
+  };
+  DOC_REF.set(data).catch(()=>{
+    // Firestore 실패 시 localStorage 에 백업
+    try{ localStorage.setItem('houseHeroV3', JSON.stringify(data)); }catch(_){}
+  });
 }
 
 // ═══════════════════════════════════════
@@ -920,32 +943,98 @@ function selBadgeMember(id){ S.selBadgeMember=id; renderBadges(); }
 function renderSettings(){
   if(S.settingsView==='chore-detail') renderChoreDetail();
   else if(S.settingsView==='chore-list') renderChoreList();
+  else if(S.settingsView==='section') renderSettingsSection();
   else renderSettingsMain();
 }
 
-function goSettingsMain(){ S.settingsView='main'; S.choreDetailId=null; renderSettings(); }
+function goSettingsMain(){ S.settingsView='main'; S.settingsSection=null; S.choreDetailId=null; renderSettings(); }
 function openChoreList(){ S.settingsView='chore-list'; renderSettings(); }
+function openSettingsSection(name){ S.settingsView='section'; S.settingsSection=name; renderSettings(); }
 
 function renderSettingsMain(){
   const isAdmin = S.loggedIn?.isAdmin;
   const el = document.getElementById('settingsContent');
 
-  // 가족 현황 (제리/또리 제외)
-  let memberRows = S.members.filter(m=>m.id!=='jerry'&&m.id!=='tori').map((m,i)=>`
-    <div class="settings-row">
-      <div class="avatar" style="background:${color(i)}20;width:38px;height:38px;font-size:19px;">${m.emoji}</div>
-      <div style="flex:1;">
-        <div style="font-weight:bold;font-size:13px;">${m.name}</div>
-        <div style="font-size:11px;color:#888;">완료 ${m.completedTasks}회 · XP ${m.xp}</div>
-      </div>
-      <span class="${m.restricted?'tag-restricted':'tag-free'}">${m.restricted?'🔒 개인':'🔓 공용'}</span>
-      ${isAdmin?`<button class="btn btn-sm btn-red" onclick="removeMember('${m.id}')" style="margin-left:4px;">삭제</button>`:''}
-    </div>`).join('');
+  const items = [
+    {key:'family',   icon:'👨‍👩‍👧', label:'가족 현황',         desc:'가족 구성원 정보'},
+    {key:'chore-mgmt',icon:'🧹', label:'집안일 목록 관리',   desc:`총 ${S.chores.length}개 항목`},
+    ...(isAdmin ? [{key:'add-member', icon:'➕', label:'가족 추가',   desc:'새 가족 구성원 등록'}] : []),
+    ...(isAdmin ? [{key:'accounts',   icon:'👑', label:'계정 관리',   desc:'계정 비밀번호·추가·삭제'}] : []),
+    {key:'app',      icon:'⚙️', label:'앱 설정',             desc:'휴가 피로도 기준 등'},
+    {key:'report',   icon:'📊', label:'보고서 다운로드',     desc:'CSV·MD 파일로 저장'},
+    ...(isAdmin ? [{key:'kakao',  icon:'📱', label:'카카오톡 일일 요약', desc:'오늘 요약 JSON 저장'}] : []),
+    ...(isAdmin ? [{key:'github', icon:'🐙', label:'GitHub 자동 저장',  desc:'주간·월간 보고서 업로드'}] : []),
+    ...(isAdmin ? [{key:'data',   icon:'⚠️', label:'데이터 관리',       desc:'초기화 등 위험 작업'}] : []),
+  ];
 
+  el.innerHTML=`
+    <div class="card" style="padding:8px 6px;">
+      ${items.map(it=>`
+        <button class="chore-btn" onclick="openSettingsSection('${it.key}')">
+          <span style="font-size:22px;width:32px;text-align:center;">${it.icon}</span>
+          <div style="flex:1;">
+            <div style="font-weight:bold;font-size:14px;">${it.label}</div>
+            <div style="font-size:11px;color:#aaa;">${it.desc}</div>
+          </div>
+          <span style="color:#bbb;font-size:20px;">›</span>
+        </button>`).join('')}
+    </div>
+    <button class="btn btn-gray" onclick="confirmLogout()">🔓 로그아웃</button>
+  `;
+}
 
-  // 계정 관리 (admin 전용)
-  let accountSection = '';
-  if(isAdmin){
+function renderSettingsSection(){
+  const isAdmin = S.loggedIn?.isAdmin;
+  const el = document.getElementById('settingsContent');
+  const sec = S.settingsSection;
+
+  const backBtn = `<button class="back-btn" onclick="goSettingsMain()">← 설정으로 돌아가기</button>`;
+
+  if(sec==='family'){
+    const memberRows = S.members.filter(m=>m.id!=='jerry'&&m.id!=='tori').map((m,i)=>`
+      <div class="settings-row">
+        <div class="avatar" style="background:${color(i)}20;width:38px;height:38px;font-size:19px;">${m.emoji}</div>
+        <div style="flex:1;">
+          <div style="font-weight:bold;font-size:13px;">${m.name}</div>
+          <div style="font-size:11px;color:#888;">완료 ${m.completedTasks}회 · XP ${m.xp}</div>
+        </div>
+        <span class="${m.restricted?'tag-restricted':'tag-free'}">${m.restricted?'🔒 개인':'🔓 공용'}</span>
+        ${isAdmin?`<button class="btn btn-sm btn-red" onclick="removeMember('${m.id}')" style="margin-left:4px;">삭제</button>`:''}
+      </div>`).join('');
+    el.innerHTML=`${backBtn}<div class="card"><div class="card-title">👨‍👩‍👧 가족 현황</div>${memberRows||'<p class="empty-msg">가족이 없어요.</p>'}</div>`;
+    return;
+  }
+
+  if(sec==='chore-mgmt'){
+    el.innerHTML=`${backBtn}
+      <div class="card">
+        <div class="card-title">🧹 집안일 목록 관리</div>
+        <div style="font-size:12px;color:#888;margin-bottom:10px;">총 ${S.chores.length}개 항목</div>
+        <button class="chore-btn" onclick="openChoreList()" style="border-color:#667eea20;">
+          <span style="font-size:20px;">📋</span>
+          <div style="flex:1;"><div style="font-weight:bold;font-size:13px;">목록 전체 보기 / 수정</div><div style="font-size:11px;color:#888;">집안일·육아·반려동물 항목 관리</div></div>
+          <span style="color:#667eea;font-size:18px;">›</span>
+        </button>
+      </div>`;
+    return;
+  }
+
+  if(sec==='add-member' && isAdmin){
+    el.innerHTML=`${backBtn}
+      <div class="card">
+        <div class="card-title">➕ 가족 추가</div>
+        <div class="emoji-grid" id="memberEmojiPicker">${MEMBER_EMOJIS.map(e=>`<button class="emoji-btn${S.selMemberEmoji===e?' sel':''}" onclick="selMemEmoji('${e}')">${e}</button>`).join('')}</div>
+        <input type="text" id="newMemberName" placeholder="이름">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:#555;">
+          <input type="checkbox" id="newMemberRestricted" style="width:auto;margin:0;padding:0;">
+          <label for="newMemberRestricted">개인 권한 보호 (본인 계정만 수정 가능)</label>
+        </div>
+        <button class="btn btn-primary" onclick="addMember()">가족 추가하기 🎉</button>
+      </div>`;
+    return;
+  }
+
+  if(sec==='accounts' && isAdmin){
     const accRows = S.accounts.map(a=>`
       <div class="settings-row">
         <div style="font-size:20px;">${a.isAdmin?'👑':member(a.memberId)?.emoji||'👤'}</div>
@@ -956,7 +1045,7 @@ function renderSettingsMain(){
         <button class="btn btn-sm" onclick="changePassword('${a.id}')" style="background:#eaf2ff;color:#2980b9;margin-right:4px;">변경</button>
         ${a.id!=='admin'?`<button class="btn btn-sm btn-red" onclick="removeAccount('${a.id}')">삭제</button>`:''}
       </div>`).join('');
-    accountSection=`
+    el.innerHTML=`${backBtn}
       <div class="card">
         <div class="card-title">👑 계정 관리 (관리자)</div>
         ${accRows}
@@ -971,84 +1060,89 @@ function renderSettingsMain(){
           <button class="btn btn-primary" onclick="addAccount()" style="margin-top:0;">계정 추가</button>
         </div>
       </div>`;
+    return;
   }
 
-  // 가족 추가 (admin 전용)
-  let addMemberSection='';
-  if(isAdmin){
-    addMemberSection=`
+  if(sec==='app'){
+    el.innerHTML=`${backBtn}
       <div class="card">
-        <div class="card-title">➕ 가족 추가</div>
-        <div class="emoji-grid" id="memberEmojiPicker">${MEMBER_EMOJIS.map(e=>`<button class="emoji-btn${S.selMemberEmoji===e?' sel':''}" onclick="selMemEmoji('${e}')">${e}</button>`).join('')}</div>
-        <input type="text" id="newMemberName" placeholder="이름">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:#555;">
-          <input type="checkbox" id="newMemberRestricted" style="width:auto;margin:0;padding:0;">
-          <label for="newMemberRestricted">개인 권한 보호 (본인 계정만 수정 가능)</label>
-        </div>
-        <button class="btn btn-primary" onclick="addMember()">가족 추가하기 🎉</button>
+        <div class="card-title">⚙️ 앱 설정</div>
+        <div style="font-size:13px;color:#555;margin-bottom:6px;">휴가 발동 피로도 기준 (이번 주)</div>
+        ${isAdmin
+          ? `<input type="number" id="vacThreshold" min="5" max="100" value="${S.settings.vacationThreshold}">
+             <button class="btn btn-primary" onclick="saveSettings()" style="margin-top:0;">저장하기</button>`
+          : `<div style="font-size:22px;font-weight:bold;color:#667eea;text-align:center;padding:8px;">${S.settings.vacationThreshold}</div>
+             <div style="font-size:11px;color:#aaa;text-align:center;">변경은 관리자만 가능합니다 👑</div>`
+        }
       </div>`;
+    return;
   }
 
-  el.innerHTML=`
-    <div class="card">
-      <div class="card-title">👨‍👩‍👧 가족 현황</div>
-      ${memberRows||'<p class="empty-msg">가족이 없어요.</p>'}
-    </div>
-    <div class="card">
-      <div class="card-title">🧹 집안일 목록 관리</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">총 ${S.chores.length}개 항목</div>
-      <button class="chore-btn" onclick="openChoreList()" style="border-color:#667eea20;">
-        <span style="font-size:20px;">📋</span>
-        <div style="flex:1;"><div style="font-weight:bold;font-size:13px;">목록 전체 보기 / 수정</div><div style="font-size:11px;color:#888;">집안일·육아·반려동물 항목 관리</div></div>
-        <span style="color:#667eea;font-size:18px;">›</span>
-      </button>
-    </div>
-    ${addMemberSection}
-    ${accountSection}
-    <div class="card">
-      <div class="card-title">⚙️ 앱 설정</div>
-      <div style="font-size:13px;color:#555;margin-bottom:6px;">휴가 발동 피로도 기준 (이번 주)</div>
-      ${isAdmin
-        ? `<input type="number" id="vacThreshold" min="5" max="100" value="${S.settings.vacationThreshold}">
-           <button class="btn btn-primary" onclick="saveSettings()" style="margin-top:0;">저장하기</button>`
-        : `<div style="font-size:22px;font-weight:bold;color:#667eea;text-align:center;padding:8px;">${S.settings.vacationThreshold}</div>
-           <div style="font-size:11px;color:#aaa;text-align:center;">변경은 관리자만 가능합니다 👑</div>`
-      }
-    </div>
-    <div class="card">
-      <div class="card-title">📊 보고서 다운로드</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">현재 데이터를 CSV(엑셀)·MD 파일로 저장합니다.</div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm" onclick="downloadReport('week')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 주</button>
-        <button class="btn btn-sm" onclick="downloadReport('month')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 달</button>
-      </div>
-    </div>
-    ${isAdmin?`
-    <div class="card">
-      <div class="card-title">📱 카카오톡 일일 요약</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">오늘 하루의 집안일·가족 메시지를 JSON으로 저장합니다.<br>저장 후 <b>send_kakao.ps1</b>을 실행하면 카카오톡으로 발송돼요.<br>자정이 되면 자동으로 저장됩니다.</div>
-      <button class="btn btn-primary" onclick="downloadDailySummary()" style="margin-top:0;">📤 오늘 요약 저장하기</button>
-    </div>
-    <div class="card">
-      <div class="card-title">🐙 GitHub 자동 저장</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">주간·월간 보고서를 GitHub 저장소에 자동으로 저장합니다.<br>새 주·새 달 시작 시 로그인하면 자동으로 이전 기간 보고서가 저장돼요.</div>
-      <input type="text" id="ghRepo" placeholder="저장소 (예: cejingme/forhome)" value="${S.settings.githubRepo||''}">
-      <input type="password" id="ghToken" placeholder="GitHub PAT (ghp_...)" value="${S.settings.githubToken||''}">
-      <button class="btn btn-primary" onclick="saveGithubSettings()" style="margin-top:0;">설정 저장 💾</button>
-      ${S.settings.githubRepo?`<div style="font-size:11px;color:#27ae60;margin-bottom:8px;">✅ 연결됨: ${S.settings.githubRepo}/reports/</div>`:''}
-      <div style="display:flex;gap:8px;margin-top:4px;">
-        <button class="btn btn-sm" onclick="manualReport('week')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 주 GitHub 저장</button>
-        <button class="btn btn-sm" onclick="manualReport('month')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 달 GitHub 저장</button>
-      </div>
-      <div style="font-size:11px;color:#aaa;margin-top:8px;">저장 경로: reports/weekly/YYYY-MM-DD.md(.csv)<br>reports/monthly/YYYY-MM.md(.csv)</div>
-    </div>
-    <div class="card" style="border:1px solid #fdedec;">
-      <div class="card-title" style="color:#e74c3c;">⚠️ 데이터 관리</div>
-      <button class="btn btn-sm btn-red" onclick="resetWeek()" style="margin-bottom:8px;width:100%;">이번 주 피로도 초기화</button>
-      <button class="btn btn-sm btn-red" onclick="resetAll()" style="width:100%;">전체 데이터 초기화 (주의!)</button>
-    </div>`:''}
-    <button class="btn btn-gray" onclick="confirmLogout()">🔓 로그아웃</button>
-  `;
+  if(sec==='report'){
+    el.innerHTML=`${backBtn}
+      <div class="card">
+        <div class="card-title">📊 보고서 다운로드</div>
+        <div style="font-size:12px;color:#888;margin-bottom:10px;">현재 데이터를 CSV(엑셀)·MD 파일로 저장합니다.</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm" onclick="downloadReport('week')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 주</button>
+          <button class="btn btn-sm" onclick="downloadReport('month')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 달</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if(sec==='kakao' && isAdmin){
+    const hasTokens = S.settings.kakaoRestApiKey && S.settings.kakaoRefreshToken;
+    el.innerHTML=`${backBtn}
+      <div class="card">
+        <div class="card-title">📱 카카오톡 일일 요약</div>
+        <div style="font-size:12px;color:#888;margin-bottom:12px;">오늘 하루의 집안일·가족 메시지를 카카오톡으로 발송합니다.<br>자정이 되면 자동으로 JSON이 저장됩니다.</div>
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <button class="btn btn-primary" onclick="sendKakaoNow()" style="margin-top:0;flex:1;background:#FEE500;color:#3C1E1E;font-weight:bold;" ${hasTokens?'':'title="토큰 설정 후 사용 가능"'}>📨 지금 보내기</button>
+          <button class="btn btn-sm" onclick="downloadDailySummary()" style="flex:1;background:#eaf2ff;color:#2980b9;">📤 JSON 저장</button>
+        </div>
+        <div style="border-top:1px solid #eee;padding-top:12px;">
+          <div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:8px;">🔑 카카오 토큰 설정</div>
+          <div style="font-size:11px;color:#aaa;margin-bottom:8px;">카카오 개발자 콘솔에서 발급받은 키를 입력하세요.</div>
+          <input type="text" id="kakaoRestApiKey" placeholder="REST API Key" value="${S.settings.kakaoRestApiKey||''}" style="font-size:12px;">
+          <input type="password" id="kakaoClientSecret" placeholder="Client Secret (선택)" value="${S.settings.kakaoClientSecret||''}" style="font-size:12px;">
+          <input type="text" id="kakaoRefreshToken" placeholder="Refresh Token" value="${S.settings.kakaoRefreshToken||''}" style="font-size:12px;">
+          <button class="btn btn-sm" onclick="saveKakaoSettings()" style="background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">설정 저장 💾</button>
+          ${hasTokens?'<div style="font-size:11px;color:#27ae60;margin-top:6px;">✅ 토큰 설정됨</div>':'<div style="font-size:11px;color:#e74c3c;margin-top:6px;">⚠️ 토큰 미설정 — 저장 후 지금 보내기 사용 가능</div>'}
+        </div>
+      </div>`;
+    return;
+  }
+
+  if(sec==='github' && isAdmin){
+    el.innerHTML=`${backBtn}
+      <div class="card">
+        <div class="card-title">🐙 GitHub 자동 저장</div>
+        <div style="font-size:12px;color:#888;margin-bottom:10px;">주간·월간 보고서를 GitHub 저장소에 자동으로 저장합니다.<br>새 주·새 달 시작 시 로그인하면 자동으로 이전 기간 보고서가 저장돼요.</div>
+        <input type="text" id="ghRepo" placeholder="저장소 (예: cejingme/forhome)" value="${S.settings.githubRepo||''}">
+        <input type="password" id="ghToken" placeholder="GitHub PAT (ghp_...)" value="${S.settings.githubToken||''}">
+        <button class="btn btn-primary" onclick="saveGithubSettings()" style="margin-top:0;">설정 저장 💾</button>
+        ${S.settings.githubRepo?`<div style="font-size:11px;color:#27ae60;margin-bottom:8px;">✅ 연결됨: ${S.settings.githubRepo}/reports/</div>`:''}
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button class="btn btn-sm" onclick="manualReport('week')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 주 GitHub 저장</button>
+          <button class="btn btn-sm" onclick="manualReport('month')" style="flex:1;background:#f0fff4;color:#27ae60;border:1px solid #a8e6cf;">🚀 이번 달 GitHub 저장</button>
+        </div>
+        <div style="font-size:11px;color:#aaa;margin-top:8px;">저장 경로: reports/weekly/YYYY-MM-DD.md(.csv)<br>reports/monthly/YYYY-MM.md(.csv)</div>
+      </div>`;
+    return;
+  }
+
+  if(sec==='data' && isAdmin){
+    el.innerHTML=`${backBtn}
+      <div class="card" style="border:1px solid #fdedec;">
+        <div class="card-title" style="color:#e74c3c;">⚠️ 데이터 관리</div>
+        <button class="btn btn-sm btn-red" onclick="resetWeek()" style="margin-bottom:8px;width:100%;">이번 주 피로도 초기화</button>
+        <button class="btn btn-sm btn-red" onclick="resetAll()" style="width:100%;">전체 데이터 초기화 (주의!)</button>
+      </div>`;
+    return;
+  }
+
+  goSettingsMain();
 }
 
 // ─── CHORE DETAIL (설정 서브뷰) ───
@@ -1120,12 +1214,11 @@ function renderChoreList(){
   }).join('');
 
   document.getElementById('settingsContent').innerHTML=`
-    <button class="back-btn" onclick="goSettingsMain()">← 설정으로 돌아가기</button>
+    <button class="back-btn" onclick="openSettingsSection('chore-mgmt')">← 집안일 목록 관리로 돌아가기</button>
     <div class="card">
       <div class="card-title">🧹 집안일 목록 (${S.chores.length}개)</div>
-      ${listHtml||'<p class="empty-msg">항목이 없어요.</p>'}
-      ${isAdmin?`<div style="margin-top:8px;border-top:1px solid #eee;padding-top:12px;">
-        <div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:8px;">➕ 새 항목 추가</div>
+      ${isAdmin?`<div style="margin-bottom:12px;border-bottom:1px solid #eee;padding-bottom:12px;">
+        <div style="font-size:13px;font-weight:bold;color:#444;margin-bottom:8px;">➕ 새 항목 추가하기</div>
         <div class="emoji-grid" id="choreEmojiPicker">${CHORE_EMOJIS.map(e=>`<button class="emoji-btn${S.selChoreEmoji===e?' sel':''}" onclick="selChoreEmoji('${e}')">${e}</button>`).join('')}</div>
         <input type="text" id="newChoreName" placeholder="이름">
         <select id="newChoreCategory">
@@ -1141,7 +1234,8 @@ function renderChoreList(){
           <option value="5">피로도 5 — 매우 힘듦</option>
         </select>
         <button class="btn btn-primary" onclick="addChoreFromList()" style="margin-top:0;">추가하기</button>
-      </div>`:'<div style="font-size:12px;color:#aaa;text-align:center;padding:8px;">항목 추가/수정은 관리자만 가능합니다.</div>'}
+      </div>`:'<div style="font-size:12px;color:#aaa;text-align:center;padding:8px;margin-bottom:12px;border-bottom:1px solid #eee;">항목 추가/수정은 관리자만 가능합니다.</div>'}
+      ${listHtml||'<p class="empty-msg">항목이 없어요.</p>'}
     </div>
   `;
 }
@@ -1565,6 +1659,99 @@ function downloadDailySummary(){
   alert('📤 오늘 요약이 저장됐어요!\n\ndownloads 폴더의 daily_summary.json 파일을\nForHouse 폴더로 옮긴 후\nsend_kakao.ps1 을 실행하면 카카오톡으로 발송됩니다.');
 }
 
+function saveKakaoSettings(){
+  S.settings.kakaoRestApiKey    = document.getElementById('kakaoRestApiKey')?.value.trim()    || '';
+  S.settings.kakaoClientSecret  = document.getElementById('kakaoClientSecret')?.value.trim()  || '';
+  S.settings.kakaoRefreshToken  = document.getElementById('kakaoRefreshToken')?.value.trim()  || '';
+  persist();
+  alert('카카오 설정이 저장됐어요! ✅');
+  openSettingsSection('kakao');
+}
+
+function buildKakaoMessage(summary){
+  const lines = ['🏠 우리 집 히어로 일일 요약', `📅 ${summary.date}`, ''];
+  if(summary.tasks.length > 0){
+    lines.push(`✅ 오늘 집안일 (${summary.tasks.length}건)`);
+    const byMember = {};
+    summary.tasks.forEach(t=>{
+      if(!byMember[t.memberName]) byMember[t.memberName]={emoji:t.memberEmoji, chores:[]};
+      byMember[t.memberName].chores.push(`${t.choreEmoji}${t.choreName}`);
+    });
+    Object.entries(byMember).forEach(([name,{emoji,chores}])=>{
+      lines.push(`${emoji} ${name}: ${chores.join(' · ')}`);
+    });
+  } else {
+    lines.push('✅ 오늘 완료한 집안일이 없어요');
+  }
+  lines.push('');
+  if(summary.messages.length > 0){
+    lines.push(`💬 가족 메시지 (${summary.messages.length}건)`);
+    summary.messages.forEach(m=>{
+      let line = `${m.fromEmoji} ${m.from} → ${m.to}: ${m.text}`;
+      if(line.length > 45) line = line.substring(0,42)+'...';
+      lines.push(line);
+    });
+  } else {
+    lines.push('💬 가족 메시지가 없어요');
+  }
+  let text = lines.join('\n');
+  if(text.length > 200) text = text.substring(0,197)+'...';
+  return text;
+}
+
+async function sendKakaoNow(){
+  const apiKey       = S.settings.kakaoRestApiKey?.trim();
+  const secret       = S.settings.kakaoClientSecret?.trim();
+  const refreshToken = S.settings.kakaoRefreshToken?.trim();
+  if(!apiKey || !refreshToken){
+    alert('⚠️ 카카오 설정에서 REST API Key와 Refresh Token을 먼저 저장해주세요.');
+    return;
+  }
+  const btn = document.querySelector('[onclick="sendKakaoNow()"]');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ 전송 중...'; }
+  try {
+    // 1. 액세스 토큰 갱신
+    let tokenBody = `grant_type=refresh_token&client_id=${encodeURIComponent(apiKey)}&refresh_token=${encodeURIComponent(refreshToken)}`;
+    if(secret) tokenBody += `&client_secret=${encodeURIComponent(secret)}`;
+    const tokenResp = await fetch('https://kauth.kakao.com/oauth/token', {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: tokenBody
+    });
+    const tokenData = await tokenResp.json();
+    if(!tokenData.access_token) throw new Error('토큰 갱신 실패: ' + (tokenData.error_description||JSON.stringify(tokenData)));
+    if(tokenData.refresh_token){
+      S.settings.kakaoRefreshToken = tokenData.refresh_token;
+      persist();
+    }
+    // 2. 메시지 구성 및 전송
+    const msgText  = buildKakaoMessage(getDailySummary());
+    const template = JSON.stringify({
+      object_type:'text', text:msgText,
+      link:{web_url:'https://cejingme.github.io/forhome', mobile_web_url:'https://cejingme.github.io/forhome'}
+    });
+    const sendResp = await fetch('https://kapi.kakao.com/v2/api/talk/memo/default/send', {
+      method:'POST',
+      headers:{'Authorization':`Bearer ${tokenData.access_token}`, 'Content-Type':'application/x-www-form-urlencoded'},
+      body:'template_object='+encodeURIComponent(template)
+    });
+    const sendData = await sendResp.json();
+    if(sendData.result_code === 0){
+      alert('✅ 카카오톡 전송 성공!\n\n' + msgText);
+    } else {
+      throw new Error(sendData.msg || JSON.stringify(sendData));
+    }
+  } catch(e){
+    if(e instanceof TypeError && e.message.includes('fetch')){
+      alert('❌ CORS 제한으로 브라우저에서 직접 전송이 불가합니다.\n\nPowerShell에서 아래 명령어를 실행해주세요:\n\n.\\send_kakao.ps1');
+    } else {
+      alert('❌ 전송 실패\n\n' + e.message);
+    }
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='📨 지금 보내기'; }
+  }
+}
+
 // 자정 자동 저장
 (function setupMidnightExport(){
   let lastDay = new Date().getDate();
@@ -1581,13 +1768,29 @@ function downloadDailySummary(){
 // ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
-load();
-if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
-  showMain();
-} else {
-  S.loggedIn=null;
-  document.getElementById('loginScreen').style.display='flex';
-}
+(async()=>{
+  await load();
+  if(S.loggedIn && S.accounts.find(a=>a.id===S.loggedIn.accountId)){
+    showMain();
+  } else {
+    S.loggedIn=null;
+    document.getElementById('loginScreen').style.display='flex';
+  }
+  // 실시간 동기화: 다른 가족이 변경하면 현재 탭 자동 반영
+  DOC_REF.onSnapshot(snap=>{
+    if(!snap.exists) return;
+    const p = snap.data();
+    S.members        = p.members        || S.members;
+    S.history        = p.history        || S.history;
+    S.messages       = p.messages       || S.messages;
+    S.chores         = p.chores         || S.chores;
+    S.badgeHistory   = p.badgeHistory   || S.badgeHistory;
+    S.badgeResetWeek = p.badgeResetWeek || S.badgeResetWeek;
+    const activeTab = ['home','tasks','calendar','badges','settings']
+      .find(t=>document.getElementById('sec-'+t)?.classList.contains('active')) || 'home';
+    showTab(activeTab);
+  });
+})();
 </script>
 </body>
 </html>
