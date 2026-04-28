@@ -1046,14 +1046,14 @@ function renderSettingsMain(){
         <button class="btn btn-sm" onclick="downloadReport('month')" style="flex:1;background:#eaf2ff;color:#2980b9;">📥 이번 달</button>
       </div>
     </div>
-    ${isAdmin?`
     <div class="card">
       <div class="card-title">📱 카카오톡 일일 요약</div>
       <div style="font-size:12px;color:#888;margin-bottom:10px;">① 아래 버튼을 눌러 오늘 요약을 저장하세요.<br>② 저장 완료 후 <b>카카오발송.bat</b>을 더블클릭하면 카카오톡으로 발송됩니다.</div>
       <button class="btn btn-primary" onclick="downloadDailySummary()" style="margin-top:0;">📤 ① 오늘 요약 저장하기</button>
       <div style="font-size:11px;color:#aaa;margin-top:6px;text-align:center;">저장 후 → 카카오발송.bat 더블클릭 📨</div>
     </div>
-<div class="card" style="border:1px solid #fdedec;">
+    ${isAdmin?`
+    <div class="card" style="border:1px solid #fdedec;">
       <div class="card-title" style="color:#e74c3c;">⚠️ 데이터 관리</div>
       <button class="btn btn-sm btn-red" onclick="resetWeek()" style="margin-bottom:8px;width:100%;">이번 주 피로도 초기화</button>
       <button class="btn btn-sm btn-red" onclick="resetAll()" style="width:100%;">전체 데이터 초기화 (주의!)</button>
