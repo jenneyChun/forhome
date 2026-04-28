@@ -1043,9 +1043,16 @@ function renderSettingsMain(){
     </div>
     <div class="card">
       <div class="card-title">📱 카카오톡 일일 요약</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">① 아래 버튼을 눌러 오늘 요약을 저장하세요.<br>② 저장 완료 후 <b>카카오발송.bat</b>을 더블클릭하면 카카오톡으로 발송됩니다.</div>
-      <button class="btn btn-primary" onclick="downloadDailySummary()" style="margin-top:0;">📤 ① 오늘 요약 저장하기</button>
-      <div style="font-size:11px;color:#aaa;margin-top:6px;text-align:center;">저장 후 → 카카오발송.bat 더블클릭 📨</div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">오늘 하루 집안일 요약을 카카오톡 <b>나에게 보내기</b>로 전송합니다.<br>매일 자정에도 자동 발송됩니다.</div>
+      <button id="kakaoSendBtn" class="btn btn-primary" onclick="sendDailySummaryToKakao()" style="margin-top:0;background:linear-gradient(135deg,#fee500,#f9d900);color:#3c1e1e;">📤 카카오톡으로 발송</button>
+    </div>
+    <div class="card">
+      <div class="card-title">🔑 카카오톡 설정</div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">처음 한 번만 입력하면 됩니다. 이 기기에만 저장됩니다.<br><a href="https://developers.kakao.com/console/app" target="_blank" style="color:#667eea;">카카오 개발자 콘솔</a>에서 REST API 키와 토큰을 확인하세요.</div>
+      <input type="text" id="kakaoApiKey" placeholder="REST API 키" value="${getKakaoConfig().apiKey||''}" style="margin-bottom:8px;">
+      <input type="text" id="kakaoRefreshToken" placeholder="리프레시 토큰" value="${getKakaoConfig().refreshToken||''}" style="margin-bottom:8px;">
+      <input type="text" id="kakaoClientSecret" placeholder="Client Secret (선택사항)" value="${getKakaoConfig().clientSecret||''}" style="margin-bottom:8px;">
+      <button class="btn btn-primary" onclick="saveKakaoConfig()" style="margin-top:0;">저장하기</button>
     </div>
     ${isAdmin?`
     <div class="card" style="border:1px solid #fdedec;">
@@ -1447,61 +1454,120 @@ function downloadReport(type){
 }
 
 // ═══════════════════════════════════════
-//  KAKAO 일일 요약
+//  KAKAO 일일 요약 + 직접 발송
 // ═══════════════════════════════════════
+function getKakaoConfig(){
+  try{ return JSON.parse(localStorage.getItem('kakaoConfig')||'{}'); }catch(e){ return {}; }
+}
+function saveKakaoConfig(){
+  const cfg = {
+    apiKey:        (document.getElementById('kakaoApiKey')?.value||'').trim(),
+    refreshToken:  (document.getElementById('kakaoRefreshToken')?.value||'').trim(),
+    clientSecret:  (document.getElementById('kakaoClientSecret')?.value||'').trim(),
+  };
+  localStorage.setItem('kakaoConfig', JSON.stringify(cfg));
+  alert('✅ 카카오 설정이 저장됐어요!\n이제 버튼을 누르면 바로 카카오톡으로 발송됩니다 📨');
+}
+
 function getDailySummary(){
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const dateISO = now.toISOString().split('T')[0];
-
+  const dateISO = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const tasks = S.history
     .filter(h => h.timestamp >= todayStart)
     .map(h => {
       const m = member(h.memberId);
       const c = S.chores.find(x => x.id === h.choreId);
       return {
-        memberName:  m?.name  || '?',
-        memberEmoji: m?.emoji || '❓',
-        choreName:   c?.name  || '?',
-        choreEmoji:  c?.emoji || '❓',
-        xp:     h.xpGained   || 0,
-        time:   new Date(h.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
+        memberName: m?.name||'?', memberEmoji: m?.emoji||'❓',
+        choreName:  c?.name||'?', choreEmoji:  c?.emoji||'❓',
+        xp: h.xpGained||0,
+        time: new Date(h.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
       };
     });
-
   const messages = S.messages
     .filter(msg => msg.timestamp >= todayStart)
     .map(msg => {
       const fromM = member(msg.fromId);
       const toM   = msg.toId ? member(msg.toId) : null;
       return {
-        from:      fromM?.name  || msg.fromId,
-        fromEmoji: fromM?.emoji || '👤',
-        to:        toM?.name    || '전체',
-        text:      msg.text,
-        time:      new Date(msg.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
+        from: fromM?.name||msg.fromId, fromEmoji: fromM?.emoji||'👤',
+        to: toM?.name||'전체', text: msg.text,
+        time: new Date(msg.timestamp).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
       };
     });
-
   return { date: dateISO, tasks, messages };
 }
 
-function downloadDailySummary(){
-  const summary = getDailySummary();
-  downloadFile(JSON.stringify(summary, null, 2), 'daily_summary.json', 'application/json;charset=utf-8;');
-  alert('✅ 저장 완료!\n\n이제 ForHouse 폴더의\n📂 카카오발송.bat 을 더블클릭하면\n카카오톡으로 발송됩니다 📨');
+function buildKakaoText(summary){
+  const {date, tasks, messages} = summary;
+  let t = `🏠 우리 집 히어로 일일 요약\n📅 ${date}\n`;
+  if(tasks.length){
+    t += `\n✅ 오늘 집안일 (${tasks.length}건)\n`;
+    tasks.forEach(x => { t += `${x.memberEmoji}${x.memberName}: ${x.choreEmoji}${x.choreName} +${x.xp}XP\n`; });
+  } else {
+    t += '\n✅ 오늘 집안일 없음\n';
+  }
+  if(messages.length){
+    t += `\n💬 가족 메시지 (${messages.length}건)\n`;
+    messages.forEach(x => { t += `${x.fromEmoji}${x.from}→${x.to}: ${x.text.slice(0,25)}\n`; });
+  }
+  return t.trim().slice(0, 2000);
 }
 
-// 자정 자동 저장
+async function sendDailySummaryToKakao(){
+  const cfg = getKakaoConfig();
+  if(!cfg.apiKey || !cfg.refreshToken){
+    alert('📱 카카오 설정이 필요해요!\n\n설정 탭 → 카카오톡 설정에서\nAPI 키와 토큰을 입력해주세요.');
+    return;
+  }
+  const btn = document.getElementById('kakaoSendBtn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ 발송 중...'; }
+  try{
+    // 1. 액세스 토큰 갱신
+    const params = new URLSearchParams({
+      grant_type:'refresh_token', client_id:cfg.apiKey, refresh_token:cfg.refreshToken,
+    });
+    if(cfg.clientSecret) params.append('client_secret', cfg.clientSecret);
+    const tokenRes = await fetch('https://kauth.kakao.com/oauth/token',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: params,
+    });
+    const tokenJson = await tokenRes.json();
+    if(!tokenJson.access_token) throw new Error(tokenJson.error_description||'토큰 갱신 실패');
+    // 갱신된 리프레시 토큰이 있으면 저장
+    if(tokenJson.refresh_token){ cfg.refreshToken=tokenJson.refresh_token; localStorage.setItem('kakaoConfig',JSON.stringify(cfg)); }
+
+    // 2. 요약 메시지 발송
+    const summary = getDailySummary();
+    const template = JSON.stringify({
+      object_type:'text',
+      text: buildKakaoText(summary),
+      link:{ web_url: location.href, mobile_web_url: location.href },
+      button_title:'앱 열기',
+    });
+    const sendRes = await fetch('https://kapi.kakao.com/v2/api/talk/memo/default/send',{
+      method:'POST',
+      headers:{ 'Authorization':`Bearer ${tokenJson.access_token}`, 'Content-Type':'application/x-www-form-urlencoded' },
+      body:`template_object=${encodeURIComponent(template)}`,
+    });
+    if(sendRes.ok){ alert('✅ 카카오톡으로 발송했어요!\n나에게 보낸 메시지함을 확인해보세요 📨'); }
+    else{ const e=await sendRes.json(); throw new Error(e.msg||'발송 실패'); }
+  }catch(e){
+    alert(`❌ 발송 실패: ${e.message}`);
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='📤 카카오톡으로 발송'; }
+  }
+}
+
+// 자정 자동 발송
 (function setupMidnightExport(){
   let lastDay = new Date().getDate();
   setInterval(()=>{
     if(!S.loggedIn) return;
     const today = new Date().getDate();
-    if(today !== lastDay){
-      lastDay = today;
-      downloadDailySummary();
-    }
+    if(today !== lastDay){ lastDay = today; sendDailySummaryToKakao(); }
   }, 60000);
 })();
 
