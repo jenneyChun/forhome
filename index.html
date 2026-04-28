@@ -357,7 +357,7 @@ let S = {
   settings: {vacationThreshold:25},
   loggedIn: null, // {accountId, memberId, isAdmin}
   // UI
-  selMemberId: null,
+  selMemberIds: [], // 여러 명 동시 선택 가능
   selChoreId: null,
   selCategory: 'all',
   rankPeriod: 'week',
@@ -697,22 +697,22 @@ function toggleHomeHistory(){ homeShowAllHistory=!homeShowAllHistory; renderHome
 //  TASKS (할 일)
 // ═══════════════════════════════════════
 function renderTasks(){
-  // 로그인한 사람 자동 선택 (아직 선택 안 됐을 때)
-  if(!S.selMemberId && S.loggedIn?.memberId) S.selMemberId = S.loggedIn.memberId;
+  // 로그인한 사람 자동 선택 (아직 아무도 선택 안 됐을 때)
+  if(!S.selMemberIds.length && S.loggedIn?.memberId) S.selMemberIds = [S.loggedIn.memberId];
   // 아들 계정이면 자녀 카테고리 자동 선택
   if(S.loggedIn?.memberId==='son' && S.selCategory==='all') S.selCategory='child';
-  // 멤버 선택 (로그인한 사람 + 아들)
+  // 멤버 선택 (로그인한 사람 + 아들) — 여러 명 동시 선택 가능
   const doers = getTaskDoers();
   const mSel=document.getElementById('memberSelector');
   if(!doers.length){
     mSel.innerHTML='<p class="empty-msg">현재 계정으로는 선택 가능한 가족이 없어요.</p>';
   } else {
-    mSel.innerHTML=doers.map(m=>`
-      <div class="chore-item${S.selMemberId===m.id?' sel':''}" onclick="selMember('${m.id}')">
+    mSel.innerHTML=`<div style="font-size:11px;color:#888;margin-bottom:6px;">여러 명 동시 선택 가능해요 👆</div>`+doers.map(m=>`
+      <div class="chore-item${S.selMemberIds.includes(m.id)?' sel':''}" onclick="selMember('${m.id}')">
         <span style="font-size:20px;">${m.emoji}</span>
         <span style="font-weight:bold;flex:1;">${m.name}</span>
         ${m.onVacation?'<span style="background:#ffeaa7;color:#7f6000;padding:2px 7px;border-radius:8px;font-size:10px;">🌴 휴가 중</span>':''}
-        <span style="font-size:11px;color:#aaa;">⭐${m.stickers}</span>
+        ${S.selMemberIds.includes(m.id)?'<span style="color:#667eea;font-size:16px;">✓</span>':`<span style="font-size:11px;color:#aaa;">⭐${m.stickers}</span>`}
       </div>`).join('');
   }
 
@@ -733,27 +733,49 @@ function renderTasks(){
     </div>`).join('') || '<p class="empty-msg">이 카테고리에 항목이 없어요.</p>';
 }
 
-function selMember(id){ S.selMemberId=id; renderTasks(); }
+function selMember(id){
+  if(S.selMemberIds.includes(id)){
+    // 이미 선택된 경우: 다른 사람이 선택된 상태면 해제, 혼자면 유지
+    if(S.selMemberIds.length>1) S.selMemberIds=S.selMemberIds.filter(x=>x!==id);
+  } else {
+    S.selMemberIds.push(id);
+  }
+  renderTasks();
+}
 function selChore(id) { S.selChoreId=id;  renderTasks(); }
 function selCategory(cat){ S.selCategory=cat; renderTasks(); }
 
 function completeTask(){
-  if(!S.selMemberId){ alert('누가 했는지 선택해주세요!'); return; }
+  if(!S.selMemberIds.length){ alert('누가 했는지 선택해주세요!'); return; }
   if(!S.selChoreId) { alert('어떤 일인지 선택해주세요!'); return; }
-  if(!canRecord(S.selMemberId)){ alert('이 가족의 기록은 본인 계정으로만 추가할 수 있어요! 🔒'); return; }
-  const m=member(S.selMemberId), c=S.chores.find(x=>x.id===S.selChoreId);
-  if(!m||!c) return;
-  m.xp+=c.xp; m.totalFatigue+=c.fatigue; m.completedTasks+=1; m.stickers+=1;
-  S.history.push({id:'h'+Date.now(), memberId:m.id, choreId:c.id, timestamp:Date.now(), xpEarned:c.xp, fatigueAdded:c.fatigue});
-  const newBadges=checkBadges(m);
+  // 권한 체크: 선택된 모든 멤버 기록 가능한지 확인
+  for(const mid of S.selMemberIds){
+    if(!canRecord(mid)){ alert('이 가족의 기록은 본인 계정으로만 추가할 수 있어요! 🔒'); return; }
+  }
+  const c=S.chores.find(x=>x.id===S.selChoreId);
+  if(!c) return;
+  const allNewBadges=[];
+  const names=[];
+  const emojis=[];
+  S.selMemberIds.forEach(mid=>{
+    const m=member(mid);
+    if(!m) return;
+    m.xp+=c.xp; m.totalFatigue+=c.fatigue; m.completedTasks+=1; m.stickers+=1;
+    S.history.push({id:'h'+Date.now()+'_'+mid, memberId:m.id, choreId:c.id, timestamp:Date.now(), xpEarned:c.xp, fatigueAdded:c.fatigue});
+    const newBadges=checkBadges(m);
+    allNewBadges.push(...newBadges);
+    names.push(m.name);
+    emojis.push(m.emoji);
+  });
   checkVacation();
   persist();
   const praise=PRAISES[Math.floor(Math.random()*PRAISES.length)];
-  const sticker='⭐'.repeat(Math.min((m.stickers-1)%5+1,5));
-  const badgeMsg=newBadges.length?'🏅 새 뱃지: '+newBadges.map(b=>b.emoji+b.name).join(', ')+'!':'';
-  showPopup(m.emoji, `${m.name}, 최고예요! 🎉`, praise, sticker, badgeMsg);
+  const nameStr=names.join(' & ');
+  const emojiStr=emojis.join('');
+  const badgeMsg=allNewBadges.length?'🏅 새 뱃지: '+allNewBadges.map(b=>b.emoji+b.name).join(', ')+'!':'';
+  showPopup(emojiStr, `${nameStr}, 최고예요! 🎉`, praise, '⭐'.repeat(names.length), badgeMsg);
   confetti();
-  S.selMemberId=null; S.selChoreId=null;
+  S.selMemberIds=[]; S.selChoreId=null;
 }
 
 // ═══════════════════════════════════════
@@ -994,14 +1016,15 @@ function renderSettingsMain(){
       <div class="card-title">👨‍👩‍👧 가족 현황</div>
       ${memberRows||'<p class="empty-msg">가족이 없어요.</p>'}
     </div>
-    <div class="card">
-      <div class="card-title">🧹 집안일 목록 관리</div>
-      <div style="font-size:12px;color:#888;margin-bottom:10px;">총 ${S.chores.length}개 항목</div>
-      <button class="chore-btn" onclick="openChoreList()" style="border-color:#667eea20;">
-        <span style="font-size:20px;">📋</span>
-        <div style="flex:1;"><div style="font-weight:bold;font-size:13px;">목록 전체 보기 / 수정</div><div style="font-size:11px;color:#888;">집안일·육아·반려동물 항목 관리</div></div>
-        <span style="color:#667eea;font-size:18px;">›</span>
-      </button>
+    <div class="card" onclick="openChoreList()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:22px;">🧹</span>
+        <div>
+          <div class="card-title" style="margin-bottom:2px;">집안일 목록 관리</div>
+          <div style="font-size:11px;color:#aaa;">총 ${S.chores.length}개 항목</div>
+        </div>
+      </div>
+      <span style="color:#667eea;font-size:20px;font-weight:bold;">›</span>
     </div>
     ${addMemberSection}
     ${accountSection}
