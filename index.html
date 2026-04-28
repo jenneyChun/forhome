@@ -311,18 +311,18 @@ const DEFAULT_CHORES = [
 
 const BADGES = [
   {id:'first',  emoji:'🌱',name:'이번 주 시작',  desc:'이번 주 첫 번째 일 완료',    cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=1},
-  {id:'t7',     emoji:'⭐',name:'열심히쟁이',    desc:'이번 주 7회 완료',            cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=7},
-  {id:'t15',    emoji:'🌟',name:'일 달인',       desc:'이번 주 15회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=15},
-  {id:'t25',    emoji:'💎',name:'슈퍼 히어로',   desc:'이번 주 25회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=25},
-  {id:'xp150',  emoji:'🏅',name:'150XP 달성',   desc:'이번 주 XP 150 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=150},
-  {id:'xp400',  emoji:'🥇',name:'XP 마스터',    desc:'이번 주 XP 400 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=400},
-  {id:'fat20',  emoji:'💪',name:'진짜 고생',     desc:'이번 주 피로도 20 이상',      cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.fatigueAdded,0)>=20},
-  {id:'st7',    emoji:'🎀',name:'스티커 수집가', desc:'이번 주 스티커 7개',          cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=7},
-  {id:'st15',   emoji:'🎁',name:'스티커 부자',   desc:'이번 주 스티커 15개',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=15},
+  {id:'t7',     emoji:'⭐',name:'열심히쟁이',    desc:'이번 주 10회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=10},
+  {id:'t15',    emoji:'🌟',name:'일 달인',       desc:'이번 주 20회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=20},
+  {id:'t25',    emoji:'💎',name:'슈퍼 히어로',   desc:'이번 주 35회 완료',           cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=35},
+  {id:'xp150',  emoji:'🏅',name:'200XP 달성',   desc:'이번 주 XP 200 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=200},
+  {id:'xp400',  emoji:'🥇',name:'XP 마스터',    desc:'이번 주 XP 600 달성',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.xpEarned,0)>=600},
+  {id:'fat20',  emoji:'💪',name:'진짜 고생',     desc:'이번 주 피로도 30 이상',      cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).reduce((s,x)=>s+x.fatigueAdded,0)>=30},
+  {id:'st7',    emoji:'🎀',name:'스티커 수집가', desc:'이번 주 스티커 10개',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=10},
+  {id:'st15',   emoji:'🎁',name:'스티커 부자',   desc:'이번 주 스티커 20개',         cond:(m,wh)=>wh.filter(x=>x.memberId===m.id).length>=20},
   {id:'vac',    emoji:'🌴',name:'휴가 권리자',   desc:'이번 주 최다 노동!',          cond:(m,wh)=>m.onVacation},
-  {id:'cook2',  emoji:'👨‍🍳',name:'요리왕',       desc:'이번 주 요리 2회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId==='c6').length>=2},
-  {id:'clean4', emoji:'🧹',name:'청소 챔피언',   desc:'이번 주 청소 4회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&['c2','c5','c9','c10','c11'].includes(x.choreId)).length>=4},
-  {id:'care4',  emoji:'👶',name:'육아 히어로',   desc:'이번 주 육아 4회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId.startsWith('p')).length>=4},
+  {id:'cook2',  emoji:'👨‍🍳',name:'요리왕',       desc:'이번 주 요리 3회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId==='c6').length>=3},
+  {id:'clean4', emoji:'🧹',name:'청소 챔피언',   desc:'이번 주 청소 6회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&['c2','c5','c9','c10','c11'].includes(x.choreId)).length>=6},
+  {id:'care4',  emoji:'👶',name:'육아 히어로',   desc:'이번 주 육아 6회 완료',       cond:(m,wh)=>wh.filter(x=>x.memberId===m.id&&x.choreId.startsWith('p')).length>=6},
 ];
 
 const TITLES = ['히어로 새싹 🌱','히어로 견습생 ⭐','히어로 달인 🌟','히어로 고수 💪','히어로 챔피언 🏆','전설의 히어로 👑'];
@@ -901,7 +901,12 @@ function renderBadges(){
   const earned=m.earnedBadges||[];
   const wt=wTasks(m.id), wf=wFatigue(m.id);
   const wStickers=wt;
-  const stars='⭐'.repeat(Math.min(wStickers,20))+(wStickers>20?`<div style="font-size:13px;margin-top:4px;">+${wStickers-20}개 더!</div>`:'');
+  const starSpecial = wStickers >= 10;
+  const starEmoji   = starSpecial ? '🌟' : '⭐';
+  const maxShow     = 20;
+  const stars = wStickers > 0
+    ? starEmoji.repeat(Math.min(wStickers, maxShow)) + (wStickers > maxShow ? `<div style="font-size:13px;margin-top:4px;">+${wStickers-maxShow}개 더!</div>` : '')
+    : '';
   disp.innerHTML=`
     <div class="card">
       <div class="card-title">📊 이번 주 현황</div>
@@ -923,8 +928,10 @@ function renderBadges(){
         </div>`;
       }).join('')}</div>
     </div>
-    <div class="card">
-      <div class="card-title">⭐ 이번 주 칭찬 스티커 (${wStickers}개)</div>
+    <div class="card" style="${starSpecial?'border:2px solid #f9d900;background:linear-gradient(135deg,#fffdf0,#fff8dc);':''}">
+      <div class="card-title" style="${starSpecial?'color:#b8860b;':''}">
+        ${starSpecial?'🌟':'⭐'} 이번 주 칭찬 스티커 (${wStickers}개)${starSpecial?' &nbsp;<span style="font-size:12px;background:#f9d900;color:#3c1e1e;padding:2px 8px;border-radius:20px;">✨ 골든 스타!</span>':''}
+      </div>
       <div style="text-align:center;font-size:24px;line-height:1.7;">${stars||'<span style="color:#ccc;font-size:14px;">아직 스티커가 없어요. 화이팅! 💪</span>'}</div>
     </div>`;
 }
