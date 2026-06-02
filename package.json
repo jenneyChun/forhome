@@ -1,0 +1,12 @@
+{
+  "name": "forhome",
+  "private": true,
+  "scripts": {
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-tests.ps1",
+    "test:e2e": "playwright test -c tests/playwright.config.js",
+    "test:e2e:headed": "playwright test -c tests/playwright.config.js --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest"
+  }
+}

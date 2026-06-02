@@ -1,1 +1,14 @@
 token.txt
+server/token.txt
+data/db.env.ps1
+data/exports/*
+!data/exports/.gitkeep
+log/*
+!log/.gitkeep
+app_state.json
+node_modules/
+playwright-report/
+test-results/
+*.log
+.edge-profile*/
+verify-home.png
