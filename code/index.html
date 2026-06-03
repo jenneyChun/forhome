@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ForHome</title>
+  <title>우리집 히어로</title>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -350,6 +350,46 @@
       display: none;
     }
     .toast.show { display: block; }
+    .photo-cell {
+      width: 88px;
+      height: 66px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f1f5f9;
+      flex: 0 0 auto;
+    }
+    .proof-preview {
+      width: 100%;
+      max-height: 180px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 8px;
+      background: #f1f5f9;
+    }
+    .review-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .review-row, .plan-row {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+    .review-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .review-row .review-row {
+      border: 0;
+      padding: 0;
+    }
     .overlay {
       position: fixed;
       inset: 0;
@@ -394,6 +434,7 @@
       .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 12; }
       .metric-row { grid-template-columns: 1fr 1fr; }
       .day { min-height: 58px; padding: 5px; }
+      .photo-cell { width: 72px; height: 58px; }
       .user-pill { max-width: 110px; }
       .form-grid { grid-template-columns: 1fr; }
       .col-2, .col-3, .col-4, .col-5, .col-6, .col-12 { grid-column: 1; }
@@ -404,22 +445,22 @@
   <section class="login-screen" id="loginScreen">
     <div class="login-box">
       <div class="brand">
-        <div class="brand-mark">FH</div>
+        <div class="brand-mark">집</div>
         <div>
-          <h1>ForHome</h1>
-          <p id="loginServerText">Checking PostgreSQL server</p>
+          <h1>우리집 히어로</h1>
+          <p id="loginServerText">저장소 연결 확인 중</p>
         </div>
       </div>
       <div class="field">
-        <label for="loginId">Account</label>
+        <label for="loginId">아이디</label>
         <input id="loginId" data-testid="login-id" autocomplete="username" value="admin">
       </div>
       <div class="field">
-        <label for="loginPw">Password</label>
+        <label for="loginPw">비밀번호</label>
         <input id="loginPw" data-testid="login-password" type="password" autocomplete="current-password" value="admin1234">
       </div>
       <div class="error" id="loginError"></div>
-      <button class="btn primary full" data-testid="login-submit" id="loginButton">Log in</button>
+      <button class="btn primary full" data-testid="login-submit" id="loginButton">로그인</button>
     </div>
   </section>
 
@@ -427,10 +468,10 @@
     <header class="topbar">
       <div class="topbar-inner">
         <div class="app-title">
-          <div class="brand-mark" style="width:38px;height:38px;font-size:16px;">FH</div>
+          <div class="brand-mark" style="width:38px;height:38px;font-size:16px;">집</div>
           <div>
-            <strong>ForHome</strong>
-            <div class="status-line" id="syncStatus">Preparing sync</div>
+            <strong>우리집 히어로</strong>
+            <div class="status-line" id="syncStatus">동기화 준비 중</div>
           </div>
         </div>
         <div class="user-area">
@@ -442,11 +483,11 @@
 
     <div class="layout">
       <nav class="tabbar" aria-label="Main menu">
-        <button class="tab-btn active" data-tab="home" data-testid="tab-home"><span>Home</span></button>
-        <button class="tab-btn" data-tab="tasks" data-testid="tab-tasks"><span>Tasks</span></button>
-        <button class="tab-btn" data-tab="calendar" data-testid="tab-calendar"><span>Calendar</span></button>
-        <button class="tab-btn" data-tab="badges" data-testid="tab-badges"><span>Badges</span></button>
-        <button class="tab-btn" data-tab="settings" data-testid="tab-settings"><span>Settings</span></button>
+        <button class="tab-btn active" data-tab="home" data-testid="tab-home"><span>오늘</span></button>
+        <button class="tab-btn" data-tab="tasks" data-testid="tab-tasks"><span>기록</span></button>
+        <button class="tab-btn" data-tab="badges" data-testid="tab-badges"><span>확인</span></button>
+        <button class="tab-btn" data-tab="calendar" data-testid="tab-calendar"><span>내일</span></button>
+        <button class="tab-btn" data-tab="settings" data-testid="tab-settings"><span>설정</span></button>
       </nav>
 
       <main class="content">
@@ -461,18 +502,34 @@
 
   <div class="overlay" id="successOverlay" hidden>
     <div class="dialog">
-      <div class="dialog-emoji" id="successEmoji">OK</div>
-      <h2 id="successTitle">Done</h2>
+      <div class="dialog-emoji" id="successEmoji">완료</div>
+      <h2 id="successTitle">기록했습니다</h2>
       <p id="successMessage"></p>
-      <button class="btn primary full" id="closeDialog">Close</button>
+      <button class="btn primary full" id="closeDialog">확인</button>
     </div>
   </div>
   <div class="toast" id="toast"></div>
 
   <script>
-    const API_MODE = location.protocol !== 'file:';
+    const FIREBASE_CONFIG = {
+      apiKey: 'AIzaSyCExIizXG3OitWMXBElM7RDMqT6jTKS-xE',
+      authDomain: 'forhome-19317.firebaseapp.com',
+      projectId: 'forhome-19317',
+      storageBucket: 'forhome-19317.firebasestorage.app',
+      messagingSenderId: '598577686461',
+      appId: '1:598577686461:web:248472a3ce70800f4354d4'
+    };
+    const FIRESTORE_FAMILY_ID = 'forhome';
+    const FIRESTORE_STATE_PATH = `families/${FIRESTORE_FAMILY_ID}/state/app`;
+    const AUTH_EMAIL_DOMAIN = 'forhome.local';
     const SESSION_KEY = 'forhome-session-v1';
-    const CATEGORIES = { all: 'All', house: 'House', care: 'Care', pet: 'Pet', child: 'Child' };
+    const TEST_STORAGE_KEY = 'forhome-test-state-v1';
+    const STORAGE_MODE = new URLSearchParams(location.search).get('storage');
+    const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+    const TEST_MODE = STORAGE_MODE === 'test'
+      || (!STORAGE_MODE && LOCAL_HOSTS.has(location.hostname))
+      || window.__FORHOME_TEST__ === true;
+    const CATEGORIES = { all: '전체', house: '집안', care: '돌봄', pet: '반려동물', child: '아이' };
     const BADGES = [
       { id: 'first', emoji: 'B1', name: 'First task', desc: 'Complete one task this week', cond: (m, h) => countFor(m, h) >= 1 },
       { id: 'five', emoji: 'B5', name: 'Steady', desc: 'Complete five tasks this week', cond: (m, h) => countFor(m, h) >= 5 },
@@ -486,9 +543,9 @@
       updatedAt: new Date().toISOString(),
       settings: { vacationThreshold: 25, weekStartsOn: 1 },
       members: [
-        memberSeed('mom', 'Mom', 'M', true, '#ef4444'),
-        memberSeed('dad', 'Dad', 'D', true, '#2563eb'),
-        memberSeed('son', 'Son', 'S', false, '#f59e0b')
+        memberSeed('mom', '엄마', '엄', true, '#ef4444'),
+        memberSeed('dad', '아빠', '아', true, '#2563eb'),
+        memberSeed('son', '아들', '들', false, '#f59e0b')
       ],
       accounts: [
         { id: 'mom', password: 'mom1234', memberId: 'mom', isAdmin: false },
@@ -497,15 +554,16 @@
         { id: 'admin', password: 'admin1234', memberId: null, isAdmin: true }
       ],
       chores: [
-        choreSeed('c1', 'Dishes', 'DI', 2, 'house'),
-        choreSeed('c2', 'Vacuum', 'VA', 3, 'house'),
-        choreSeed('c3', 'Laundry', 'LA', 2, 'house'),
-        choreSeed('p1', 'Medicine', 'ME', 2, 'care'),
-        choreSeed('pet1', 'Pet food', 'PF', 1, 'pet'),
-        choreSeed('ch1', 'Clean room', 'CR', 1, 'child')
+        choreSeed('c1', '설거지', '식', 2, 'house'),
+        choreSeed('c2', '청소기 돌리기', '청', 3, 'house'),
+        choreSeed('c3', '빨래', '빨', 2, 'house'),
+        choreSeed('p1', '약 챙기기', '약', 2, 'care'),
+        choreSeed('pet1', '밥 주기', '밥', 1, 'pet'),
+        choreSeed('ch1', '방 정리', '방', 1, 'child')
       ],
       history: [],
       messages: [],
+      tomorrowPlans: [],
       badgeHistory: []
     });
     function memberSeed(id, name, emoji, restricted, color) {
@@ -525,7 +583,8 @@
     let calendarMonth = new Date();
     let selectedDate = dateKey(Date.now());
     let saving = false;
-    let syncTimer = null;
+    let storageProvider = null;
+    let unsubscribeState = null;
 
     const $ = (id) => document.getElementById(id);
     const money = new Intl.NumberFormat('en-US');
@@ -538,41 +597,205 @@
     $('closeDialog').addEventListener('click', () => $('successOverlay').hidden = true);
     document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
-    async function init() {
-      await loadState();
-      session = readJson(sessionStorage.getItem(SESSION_KEY));
-      if (session && !account(session.accountId)) session = null;
-      if (session) showApp(); else showLogin();
-      if (syncTimer) clearInterval(syncTimer);
-      syncTimer = setInterval(refreshIfChanged, 8000);
+    function createStorageProvider() {
+      return TEST_MODE ? createTestStorageProvider() : createFirebaseStorageProvider();
     }
 
-    async function loadState() {
+    function authEmailFor(accountId) {
+      return `${String(accountId || '').trim().toLowerCase()}@${AUTH_EMAIL_DOMAIN}`;
+    }
+
+    function accountIdFromEmail(email) {
+      const lower = String(email || '').trim().toLowerCase();
+      const suffix = `@${AUTH_EMAIL_DOMAIN}`;
+      return lower.endsWith(suffix) ? lower.slice(0, -suffix.length) : lower;
+    }
+
+    function accountTemplate(accountId) {
+      const id = String(accountId || '').trim();
+      return (state.accounts || []).find(a => a.id === id) || defaultState().accounts.find(a => a.id === id);
+    }
+
+    function sessionForAccountId(accountId) {
+      const acc = accountTemplate(accountId);
+      return acc ? { accountId: acc.id, memberId: acc.memberId, isAdmin: !!acc.isAdmin } : null;
+    }
+
+    function createTestStorageProvider() {
+      return {
+        mode: 'test',
+        label: 'Playwright mock storage',
+        async initialize() {},
+        getCurrentSession() {
+          return readJson(sessionStorage.getItem(SESSION_KEY));
+        },
+        async login(accountId, password) {
+          const acc = defaultState().accounts.find(a => a.id === accountId && a.password === password);
+          if (!acc) throw new Error('아이디와 비밀번호를 확인해 주세요.');
+          return { accountId: acc.id, memberId: acc.memberId, isAdmin: !!acc.isAdmin };
+        },
+        async logout() {},
+        async loadState() {
+          const saved = readJson(localStorage.getItem(TEST_STORAGE_KEY));
+          if (saved) return saved;
+          const seeded = { ...defaultState(), version: 1, updatedAt: new Date().toISOString() };
+          localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(seeded));
+          return seeded;
+        },
+        async saveState(next) {
+          const current = readJson(localStorage.getItem(TEST_STORAGE_KEY));
+          const saved = { ...next, version: Number(current?.version || next.version || 0) + 1, updatedAt: new Date().toISOString() };
+          localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(saved));
+          window.dispatchEvent(new CustomEvent('forhome-test-state-updated', { detail: saved }));
+          return saved;
+        },
+        subscribeState(onState) {
+          const onStorage = (event) => {
+            if (event.key !== TEST_STORAGE_KEY || !event.newValue) return;
+            const next = readJson(event.newValue);
+            if (next) onState(next);
+          };
+          const onLocal = (event) => onState(event.detail);
+          window.addEventListener('storage', onStorage);
+          window.addEventListener('forhome-test-state-updated', onLocal);
+          return () => {
+            window.removeEventListener('storage', onStorage);
+            window.removeEventListener('forhome-test-state-updated', onLocal);
+          };
+        },
+        getCurrentAccountId() {
+          return this.getCurrentSession()?.accountId || null;
+        }
+      };
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+          existing.addEventListener('load', resolve, { once: true });
+          existing.addEventListener('error', reject, { once: true });
+          if (existing.dataset.loaded === 'true') resolve();
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => {
+          script.dataset.loaded = 'true';
+          resolve();
+        };
+        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function loadFirebaseSdk() {
+      if (window.firebase?.auth && window.firebase?.firestore) return;
+      const base = 'https://www.gstatic.com/firebasejs/10.14.1';
+      await loadScript(`${base}/firebase-app-compat.js`);
+      await loadScript(`${base}/firebase-auth-compat.js`);
+      await loadScript(`${base}/firebase-firestore-compat.js`);
+    }
+
+    function createFirebaseStorageProvider() {
+      let auth = null;
+      let db = null;
+      let stateRef = null;
+      return {
+        mode: 'firebase',
+        label: 'Firebase Firestore',
+        async initialize() {
+          await loadFirebaseSdk();
+          if (!window.firebase) throw new Error('Firebase SDK failed to load.');
+          if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+          auth = firebase.auth();
+          db = firebase.firestore();
+          stateRef = db.doc(FIRESTORE_STATE_PATH);
+          await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+          await new Promise((resolve) => {
+            const unsubscribe = auth.onAuthStateChanged(() => {
+              unsubscribe();
+              resolve();
+            });
+          });
+        },
+        getCurrentSession() {
+          const accountId = accountIdFromEmail(auth?.currentUser?.email);
+          return accountId ? sessionForAccountId(accountId) : null;
+        },
+        async login(accountId, password) {
+          await auth.signInWithEmailAndPassword(authEmailFor(accountId), password);
+          const sessionData = sessionForAccountId(accountId);
+          if (!sessionData) throw new Error('This Firebase account is not mapped to a ForHome account.');
+          return sessionData;
+        },
+        async logout() {
+          if (auth?.currentUser) await auth.signOut();
+        },
+        async loadState(options = {}) {
+          const snap = await stateRef.get();
+          if (snap.exists) return snap.data();
+          if (!options.seedIfMissing) {
+            throw new Error('Firestore state is not initialized. Log in as admin first.');
+          }
+          const seeded = { ...defaultState(), version: 1, updatedAt: new Date().toISOString() };
+          await stateRef.set(seeded);
+          return seeded;
+        },
+        async saveState(next) {
+          const saved = { ...next, version: Number(next.version || 0) + 1, updatedAt: new Date().toISOString() };
+          await stateRef.set(saved);
+          return saved;
+        },
+        subscribeState(onState) {
+          return stateRef.onSnapshot(
+            (snap) => { if (snap.exists) onState(snap.data()); },
+            (err) => setStatus(`Firestore listen failed: ${err.message}`)
+          );
+        },
+        getCurrentAccountId() {
+          return accountIdFromEmail(auth?.currentUser?.email);
+        }
+      };
+    }
+
+    async function init() {
+      storageProvider = createStorageProvider();
+      state = normalizeState(defaultState());
       try {
-        if (!API_MODE) throw new Error('Open through the PowerShell server.');
-        state = normalizeState(await api('/api/state'));
-        $('loginServerText').textContent = 'PostgreSQL server connected';
-        setStatus('Synced');
+        await storageProvider.initialize();
+        $('loginServerText').textContent = `${storageProvider.label} ready`;
+        setStatus('준비됨');
+        session = storageProvider.getCurrentSession();
+        if (session) {
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+          await loadState({ seedIfMissing: session.isAdmin });
+          startStateSubscription();
+          showApp();
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+          showLogin();
+        }
       } catch (err) {
-        state = normalizeState(defaultState());
-        $('loginServerText').textContent = 'PostgreSQL server unavailable';
-        setStatus('Server connection failed');
-        toast(`Server error: ${err.message}`);
+        $('loginServerText').textContent = '저장소 연결 실패';
+        setStatus('저장소 사용 불가');
+        toast(`저장소 오류: ${err.message}`);
+        showLogin();
       }
     }
 
-    function normalizeState(next) {
-      const base = defaultState();
-      const merged = { ...base, ...(next || {}) };
-      merged.settings = { ...base.settings, ...(next?.settings || {}) };
-      merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m })) : base.members;
-      merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
-      merged.accounts = Array.isArray(next?.accounts) && next.accounts.length ? next.accounts : base.accounts;
-      merged.history = Array.isArray(next?.history) ? next.history : [];
-      merged.messages = Array.isArray(next?.messages) ? next.messages : [];
-      merged.badgeHistory = Array.isArray(next?.badgeHistory) ? next.badgeHistory : [];
-      updateVacationFlags(merged);
-      return merged;
+    async function loadState(options = {}) {
+      try {
+        state = normalizeState(await storageProvider.loadState(options));
+        $('loginServerText').textContent = `${storageProvider.label} connected`;
+        setStatus(`동기화됨 v${state.version || 0}`);
+      } catch (err) {
+        state = normalizeState(defaultState());
+        $('loginServerText').textContent = `${storageProvider.label} unavailable`;
+        setStatus('저장소 불러오기 실패');
+        toast(`저장소 오류: ${err.message}`);
+        throw err;
+      }
     }
 
     async function saveState(showSaved = true) {
@@ -580,66 +803,89 @@
       state.updatedAt = new Date().toISOString();
       updateVacationFlags(state);
       try {
-        if (!API_MODE) throw new Error('Server mode is required.');
-        state = normalizeState(await api('/api/state', { method: 'POST', body: JSON.stringify(state) }));
-        setStatus(`Synced v${state.version || 0}`);
-        if (showSaved) toast('Saved');
+        state = normalizeState(await storageProvider.saveState(state));
+        setStatus(`동기화됨 v${state.version || 0}`);
+        if (showSaved) toast('저장했습니다');
       } catch (err) {
-        setStatus('PostgreSQL save failed');
-        toast(`Save failed: ${err.message}`);
+        setStatus('저장 실패');
+        toast(`저장 실패: ${err.message}`);
       } finally {
         saving = false;
       }
       render();
     }
 
+    function startStateSubscription() {
+      if (unsubscribeState) unsubscribeState();
+      unsubscribeState = storageProvider.subscribeState((remoteState) => {
+        if (saving || $('appShell').hidden) return;
+        const active = document.activeElement;
+        if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+        const remote = normalizeState(remoteState);
+        if ((remote.version || 0) !== (state.version || 0)) {
+          state = remote;
+          setStatus(`동기화됨 v${state.version || 0}`);
+          render();
+        }
+      });
+    }
+
     async function refreshIfChanged() {
-      if (!API_MODE || saving || $('appShell').hidden) return;
+      if (saving || $('appShell').hidden) return;
       const active = document.activeElement;
       if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
       try {
-        const remote = normalizeState(await api('/api/state'));
+        const remote = normalizeState(await storageProvider.loadState());
         if ((remote.version || 0) !== (state.version || 0)) {
           state = remote;
-          setStatus(`Synced v${state.version || 0}`);
+          setStatus(`동기화됨 v${state.version || 0}`);
           render();
         }
       } catch {
-        setStatus('Server check failed');
+        setStatus('저장소 확인 실패');
       }
     }
 
     async function hardReload() {
-      await loadState();
-      render();
-      toast('Reloaded');
+      try {
+        await loadState();
+        render();
+        toast('새로고침했습니다');
+      } catch {}
     }
 
-    async function api(path, options = {}) {
-      const res = await fetch(path, {
-        ...options,
-        headers: { 'Content-Type': 'application/json; charset=utf-8', ...(options.headers || {}) }
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      return res.json();
-    }
-
-    function doLogin() {
+    async function doLogin() {
       const id = $('loginId').value.trim();
       const pw = $('loginPw').value;
-      const acc = state.accounts.find(x => x.id === id && x.password === pw);
+      const acc = accountTemplate(id);
       if (!acc) {
-        $('loginError').textContent = 'Check account and password.';
+        $('loginError').textContent = '아이디와 비밀번호를 확인해 주세요.';
         return;
       }
-      session = { accountId: acc.id, memberId: acc.memberId, isAdmin: !!acc.isAdmin };
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      showApp();
+      $('loginButton').disabled = true;
+      $('loginError').textContent = '';
+      try {
+        session = await storageProvider.login(id, pw);
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        await loadState({ seedIfMissing: session.isAdmin });
+        startStateSubscription();
+        showApp();
+      } catch (err) {
+        $('loginError').textContent = err.message || '로그인에 실패했습니다.';
+      } finally {
+        $('loginButton').disabled = false;
+      }
     }
 
-    function logout() {
+    async function logout() {
+      if (unsubscribeState) {
+        unsubscribeState();
+        unsubscribeState = null;
+      }
       sessionStorage.removeItem(SESSION_KEY);
+      try { await storageProvider.logout(); } catch {}
       session = null;
+      state = normalizeState(defaultState());
       showLogin();
     }
     function showLogin() { $('loginScreen').hidden = false; $('appShell').hidden = true; }
@@ -670,45 +916,6 @@
       if (activeTab === 'settings') renderSettings();
     }
 
-    function renderHome() {
-      const weekly = weekHistory();
-      const ranked = [...state.members].sort((a, b) => xpFor(b, weekly) - xpFor(a, weekly));
-      const top = ranked.find(m => countFor(m, weekly));
-      const totalXp = weekly.reduce((sum, x) => sum + Number(x.xpEarned || 0), 0);
-      const messages = [...state.messages].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
-      const recent = [...state.history].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
-      $('section-home').innerHTML = `
-        <div class="grid">
-          <div class="panel span-5">
-            <div class="panel-head"><div class="panel-title">Weekly balance</div><span class="tag blue">v${state.version || 0}</span></div>
-            <div class="metric-row">
-              <div class="metric"><span>Done</span><strong>${weekly.length}</strong></div>
-              <div class="metric"><span>XP</span><strong>${money.format(totalXp)}</strong></div>
-              <div class="metric"><span>Leader</span><strong style="font-size:18px;">${top ? `${escapeHtml(top.emoji)} ${escapeHtml(top.name)}` : '-'}</strong></div>
-            </div>
-          </div>
-          <div class="panel span-7">
-            <div class="panel-head"><div class="panel-title">Family fatigue</div><span class="mini">Rest threshold ${state.settings.vacationThreshold}</span></div>
-            <div class="list">${state.members.map(renderMemberRow).join('')}</div>
-          </div>
-          <div class="panel span-5">
-            <div class="panel-head"><div class="panel-title">Weekly ranking</div></div>
-            <div class="list">${ranked.map((m, i) => renderRankRow(m, i + 1, weekly)).join('')}</div>
-          </div>
-          <div class="panel span-7">
-            <div class="panel-head"><div class="panel-title">Family messages</div></div>
-            <div class="field"><select id="messageTo">${messageOptions()}</select></div>
-            <div class="field"><textarea id="messageText" data-testid="message-text" placeholder="Message"></textarea></div>
-            <button class="btn primary full" data-testid="send-message" onclick="sendMessage()">Send</button>
-            <div class="list" style="margin-top:12px;">${messages.length ? messages.map(renderMessage).join('') : '<div class="empty">No messages yet</div>'}</div>
-          </div>
-          <div class="panel span-12">
-            <div class="panel-head"><div class="panel-title">Recent activity</div></div>
-            <div class="list">${recent.length ? recent.map(renderActivity).join('') : '<div class="empty">No records yet</div>'}</div>
-          </div>
-        </div>`;
-    }
-
     function renderMemberRow(m) {
       const fatigue = weekFatigue(m.id);
       const pct = Math.min(100, Math.round(fatigue / state.settings.vacationThreshold * 100));
@@ -721,48 +928,16 @@
     function renderMessage(msg) {
       const from = member(msg.fromId);
       const to = msg.toId ? member(msg.toId) : null;
-      return `<div class="message-row"><div class="name-line"><strong>${escapeHtml(from?.emoji || 'AD')} ${escapeHtml(from?.name || msg.fromId)}</strong><span class="mini">${formatTime(msg.timestamp)}</span></div><div>${escapeHtml(msg.text)}</div><div class="mini">To: ${to ? `${escapeHtml(to.emoji)} ${escapeHtml(to.name)}` : 'All'}</div></div>`;
-    }
-    function renderActivity(entry) {
-      const m = member(entry.memberId);
-      const c = chore(entry.choreId);
-      return `<div class="activity-row"><div class="avatar" style="background:${softColor(m?.color)}">${escapeHtml(m?.emoji || 'U')}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || 'Unknown')}</strong><span class="mini">${formatTime(entry.timestamp)}</span></div><div class="mini">${escapeHtml(entry.choreEmoji || c?.emoji || 'OK')} ${escapeHtml(entry.choreName || c?.name || 'Task')} / +${entry.xpEarned || 0}XP / fatigue ${entry.fatigueAdded || 0}</div></div></div>`;
-    }
-
-    function renderTasks() {
-      const allowed = firstAllowedMember();
-      if (!selectedMemberId || !canActAs(member(selectedMemberId))) selectedMemberId = allowed?.id || state.members[0]?.id;
-      const chores = state.chores.filter(c => selectedCategory === 'all' || c.category === selectedCategory);
-      if (!selectedChoreId || !chores.find(c => c.id === selectedChoreId)) selectedChoreId = chores[0]?.id || null;
-      $('section-tasks').innerHTML = `
-        <div class="grid">
-          <div class="panel span-12"><div class="panel-head"><div class="panel-title">Who did it?</div></div><div class="selector-grid">${state.members.map(renderMemberSelect).join('')}</div></div>
-          <div class="panel span-12"><div class="panel-head"><div class="panel-title">What was done?</div></div><div class="segmented" style="margin-bottom:10px;">${Object.entries(CATEGORIES).map(([id, label]) => `<button class="chip ${selectedCategory === id ? 'active' : ''}" onclick="setCategory('${id}')">${label}</button>`).join('')}</div><div class="list" data-testid="chore-list">${chores.map(renderChoreSelect).join('')}</div><button class="btn primary full" data-testid="complete-task" style="margin-top:12px;" onclick="completeTask()">Complete</button></div>
-        </div>`;
+      return `<div class="message-row"><div class="name-line"><strong>${escapeHtml(from?.emoji || 'AD')} ${escapeHtml(from?.name || msg.fromId)}</strong><span class="mini">${formatTime(msg.timestamp)}</span></div><div>${escapeHtml(msg.text)}</div><div class="mini">받는 사람: ${to ? `${escapeHtml(to.emoji)} ${escapeHtml(to.name)}` : '전체'}</div></div>`;
     }
     function renderMemberSelect(m) {
       const disabled = !canActAs(m);
-      return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? 'Owner/Admin' : 'Shared'}</div></div></button>`;
+      return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? '본인/관리자' : '공동 기록'}</div></div></button>`;
     }
     function renderChoreSelect(c) {
-      return `<button class="chore-row ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="avatar">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP / ${c.fatigue}</span></button>`;
+      return `<button class="chore-row ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="avatar">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP · 부담 ${c.fatigue}</span></button>`;
     }
 
-    function renderCalendar() {
-      const year = calendarMonth.getFullYear();
-      const month = calendarMonth.getMonth();
-      const first = new Date(year, month, 1);
-      const start = new Date(first);
-      const firstDay = (first.getDay() + 6) % 7;
-      start.setDate(first.getDate() - firstDay);
-      const days = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
-      const selectedEntries = entriesByDate(selectedDate);
-      $('section-calendar').innerHTML = `
-        <div class="grid">
-          <div class="panel span-8"><div class="calendar-head"><button class="btn icon" onclick="moveMonth(-1)">&lt;</button><div class="panel-title">${year}-${String(month + 1).padStart(2, '0')}</div><button class="btn icon" onclick="moveMonth(1)">&gt;</button></div><div class="calendar-grid">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x => `<div class="weekday">${x}</div>`).join('')}${days.map(d => renderDay(d, month)).join('')}</div></div>
-          <div class="panel span-4"><div class="panel-head"><div class="panel-title">${selectedDate}</div></div><div class="list">${selectedEntries.length ? selectedEntries.map(renderActivity).join('') : '<div class="empty">No records on this date</div>'}</div></div>
-        </div>`;
-    }
     function renderDay(d, currentMonth) {
       const key = dateKey(d.getTime());
       const entries = entriesByDate(key);
@@ -773,31 +948,6 @@
       return `<button class="${classes.join(' ')}" onclick="selectDate('${key}')"><strong>${d.getDate()}</strong><div class="dot-row">${entries.slice(0, 8).map(() => '<span class="dot"></span>').join('')}</div></button>`;
     }
 
-    function renderBadges() {
-      const selected = member(badgeMemberId) || state.members[0];
-      badgeMemberId = selected?.id;
-      const weekly = weekHistory();
-      const earned = new Set(selected?.earnedBadges || []);
-      $('section-badges').innerHTML = `<div class="grid"><div class="panel span-12"><div class="segmented">${state.members.map(m => `<button class="chip ${badgeMemberId === m.id ? 'active' : ''}" onclick="selectBadgeMember('${m.id}')">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</button>`).join('')}</div></div><div class="panel span-12"><div class="panel-head"><div class="panel-title">${escapeHtml(selected?.emoji || '')} ${escapeHtml(selected?.name || '')}</div><span class="mini">${countFor(selected, weekly)} tasks this week</span></div><div class="badge-grid">${BADGES.map(b => { const unlocked = earned.has(b.id) || b.cond(selected, weekly); return `<div class="badge-item ${unlocked ? '' : 'locked'}"><div class="badge-emoji">${b.emoji}</div><strong>${escapeHtml(b.name)}</strong><div class="mini">${escapeHtml(b.desc)}</div><span class="tag ${unlocked ? 'teal' : ''}">${unlocked ? 'Unlocked' : 'Locked'}</span></div>`; }).join('')}</div></div></div>`;
-    }
-
-    function renderSettings() {
-      if (!session?.isAdmin) {
-        $('section-settings').innerHTML = `<div class="panel"><div class="panel-title">Settings</div><div class="empty" style="margin-top:12px;">Admin account required</div></div>`;
-        return;
-      }
-      $('section-settings').innerHTML = `
-        <div class="grid">
-          <div class="panel span-6"><div class="panel-head"><div class="panel-title">Operation</div></div><div class="form-grid"><div class="field col-6"><label>Rest threshold</label><input id="vacationThreshold" type="number" min="5" max="100" value="${state.settings.vacationThreshold}"></div><div class="field col-6"><label>Week starts</label><select id="weekStartsOn"><option value="1" ${state.settings.weekStartsOn === 1 ? 'selected' : ''}>Monday</option><option value="0" ${state.settings.weekStartsOn === 0 ? 'selected' : ''}>Sunday</option></select></div><button class="btn primary col-6" onclick="saveSettings()">Save</button><button class="btn col-6" onclick="exportDailySummary()">Export daily summary</button><button class="btn danger col-6" onclick="resetWeek()">Delete this week</button><button class="btn danger col-6" onclick="resetAll()">Reset all</button></div></div>
-          <div class="panel span-6"><div class="panel-head"><div class="panel-title">Members</div></div><div class="form-grid"><div class="field col-3"><label>Icon</label><input id="memberEmoji" maxlength="4" value="U"></div><div class="field col-4"><label>Name</label><input id="memberName" placeholder="Name"></div><div class="field col-3"><label>Mode</label><select id="memberRestricted"><option value="false">Shared</option><option value="true">Owner</option></select></div><button class="btn primary col-2" onclick="addMember()">Add</button></div><div class="list" style="margin-top:10px;">${state.members.map(renderMemberSetting).join('')}</div></div>
-          <div class="panel span-6"><div class="panel-head"><div class="panel-title">Chores</div></div><div class="form-grid"><div class="field col-2"><label>Icon</label><input id="choreEmoji" maxlength="4" value="OK"></div><div class="field col-4"><label>Name</label><input id="choreName" placeholder="Chore"></div><div class="field col-3"><label>Category</label><select id="choreCategory">${Object.entries(CATEGORIES).filter(x => x[0] !== 'all').map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><div class="field col-2"><label>Fatigue</label><input id="choreFatigue" type="number" min="1" max="10" value="2"></div><button class="btn primary col-1" onclick="addChore()">+</button></div><div class="list" style="margin-top:10px;">${state.chores.map(renderChoreSetting).join('')}</div></div>
-          <div class="panel span-6"><div class="panel-head"><div class="panel-title">Accounts</div></div><div class="form-grid"><div class="field col-3"><label>ID</label><input id="accountId" placeholder="id"></div><div class="field col-3"><label>Password</label><input id="accountPw" placeholder="password"></div><div class="field col-4"><label>Member</label><select id="accountMember"><option value="">Admin</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}</select></div><button class="btn primary col-2" onclick="addAccount()">Add</button></div><div class="list" style="margin-top:10px;">${state.accounts.map(renderAccountSetting).join('')}</div></div>
-        </div>`;
-    }
-    function renderMemberSetting(m) { return `<div class="account-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? 'Owner/Admin' : 'Shared'}</div></div><button class="btn icon danger" onclick="removeMember('${m.id}')">X</button></div>`; }
-    function renderChoreSetting(c) { return `<div class="account-row"><div class="avatar">${escapeHtml(c.emoji)}</div><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="mini">${CATEGORIES[c.category]} / fatigue ${c.fatigue} / ${c.xp}XP</div></div><button class="btn icon danger" onclick="removeChore('${c.id}')">X</button></div>`; }
-    function renderAccountSetting(acc) { const m = member(acc.memberId); const label = acc.isAdmin ? 'Admin' : `${m?.emoji || ''} ${m?.name || 'No member'}`; return `<div class="account-row"><span class="tag blue">${escapeHtml(acc.id)}</span><div class="grow">${escapeHtml(label)}<div class="mini">${acc.password.replace(/./g, '*')}</div></div><button class="btn icon danger" onclick="removeAccount('${acc.id}')">X</button></div>`; }
-
     function selectMember(id) { selectedMemberId = id; renderTasks(); }
     function selectChore(id) { selectedChoreId = id; renderTasks(); }
     function setCategory(id) { selectedCategory = id; selectedChoreId = null; renderTasks(); }
@@ -805,30 +955,15 @@
     function selectBadgeMember(id) { badgeMemberId = id; renderBadges(); }
     function moveMonth(delta) { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + delta, 1); renderCalendar(); }
 
-    async function completeTask() {
-      const m = member(selectedMemberId);
-      const c = chore(selectedChoreId);
-      if (!m || !c || !canActAs(m)) return;
-      const entry = { id: `h${Date.now()}`, memberId: m.id, choreId: c.id, choreName: c.name, choreEmoji: c.emoji, category: c.category, fatigueAdded: Number(c.fatigue), xpEarned: Number(c.xp), timestamp: Date.now() };
-      state.history.push(entry);
-      m.completedTasks = Number(m.completedTasks || 0) + 1;
-      m.totalFatigue = Number(m.totalFatigue || 0) + Number(c.fatigue);
-      m.xp = Number(m.xp || 0) + Number(c.xp);
-      m.stickers = Number(m.stickers || 0) + 1;
-      const newBadges = grantBadges(m);
-      await saveState(false);
-      showSuccess('OK', `${m.name} completed`, `${c.name} / +${c.xp}XP${newBadges.length ? ` / new badge ${newBadges.map(b => b.emoji).join(' ')}` : ''}`);
-    }
-
     async function sendMessage() {
       const text = $('messageText').value.trim();
-      if (!text) return toast('Enter a message');
+      if (!text) return toast('메시지를 입력해 주세요');
       const acc = account(session.accountId);
       const fromId = acc?.memberId || 'admin';
       state.messages.push({ id: `msg${Date.now()}`, fromId, toId: $('messageTo').value || null, text, timestamp: Date.now() });
       grantBadges(member(fromId));
       await saveState(false);
-      toast('Message sent');
+      toast('메시지를 보냈습니다');
     }
 
     async function saveSettings() {
@@ -838,13 +973,13 @@
     }
     async function addMember() {
       const name = $('memberName').value.trim();
-      if (!name) return toast('Enter a name');
+      if (!name) return toast('이름을 입력해 주세요');
       const id = `m${Date.now()}`;
       state.members.push(memberSeed(id, name, $('memberEmoji').value.trim() || 'U', $('memberRestricted').value === 'true', randomColor()));
       await saveState();
     }
     async function removeMember(id) {
-      if (!confirm('Delete member?')) return;
+      if (!confirm('가족을 삭제할까요?')) return;
       state.members = state.members.filter(m => m.id !== id);
       state.history = state.history.filter(h => h.memberId !== id);
       state.messages = state.messages.filter(m => m.fromId !== id && m.toId !== id);
@@ -853,13 +988,13 @@
     }
     async function addChore() {
       const name = $('choreName').value.trim();
-      if (!name) return toast('Enter a chore name');
+      if (!name) return toast('집안일 이름을 입력해 주세요');
       const fatigue = clamp(Number($('choreFatigue').value || 2), 1, 10);
       state.chores.push(choreSeed(`c${Date.now()}`, name, $('choreEmoji').value.trim() || 'OK', fatigue, $('choreCategory').value));
       await saveState();
     }
     async function removeChore(id) {
-      if (!confirm('Delete chore?')) return;
+      if (!confirm('집안일을 삭제할까요?')) return;
       state.chores = state.chores.filter(c => c.id !== id);
       if (selectedChoreId === id) selectedChoreId = null;
       await saveState();
@@ -868,84 +1003,38 @@
       const id = $('accountId').value.trim();
       const pw = $('accountPw').value.trim();
       const memberId = $('accountMember').value || null;
-      if (!id || !pw) return toast('Enter ID and password');
-      if (state.accounts.some(a => a.id === id)) return toast('Account already exists');
+      if (!id || !pw) return toast('아이디와 비밀번호를 입력해 주세요');
+      if (state.accounts.some(a => a.id === id)) return toast('이미 있는 계정입니다');
       state.accounts.push({ id, password: pw, memberId, isAdmin: !memberId });
       await saveState();
     }
     async function removeAccount(id) {
-      if (id === session.accountId) return toast('Cannot delete current account');
-      if (!confirm('Delete account?')) return;
+      if (id === session.accountId) return toast('현재 로그인한 계정은 삭제할 수 없습니다');
+      if (!confirm('계정을 삭제할까요?')) return;
       state.accounts = state.accounts.filter(a => a.id !== id);
       await saveState();
     }
     async function resetWeek() {
-      if (!confirm('Delete this week records?')) return;
+      if (!confirm('이번 주 기록을 삭제할까요?')) return;
       const ws = weekStartTs();
       state.history = state.history.filter(h => Number(h.timestamp) < ws);
       state.badgeHistory = state.badgeHistory.filter(h => Number(h.timestamp) < ws);
-      recalcMemberTotals();
+      applyMemberTotals();
       await saveState();
     }
     async function resetAll() {
-      if (!confirm('Reset all app data?')) return;
+      if (!confirm('전체 앱 데이터를 초기화할까요?')) return;
       state = defaultState();
-      sessionStorage.removeItem(SESSION_KEY);
       await saveState(false);
-      session = null;
-      showLogin();
+      await logout();
     }
     async function exportDailySummary() {
       const summary = buildDailySummary();
-      await api('/api/daily-summary', { method: 'POST', body: JSON.stringify(summary) });
-      toast('Daily summary exported');
+      localStorage.setItem('forhome-last-daily-summary', JSON.stringify(summary));
+      toast('오늘 요약을 준비했습니다');
     }
 
-    function grantBadges(m) {
-      if (!m) return [];
-      if (!Array.isArray(m.earnedBadges)) m.earnedBadges = [];
-      const weekly = weekHistory();
-      const created = [];
-      BADGES.forEach(b => {
-        if (!m.earnedBadges.includes(b.id) && b.cond(m, weekly)) {
-          m.earnedBadges.push(b.id);
-          state.badgeHistory.push({ id: `b${Date.now()}${b.id}`, memberId: m.id, badgeId: b.id, name: b.name, emoji: b.emoji, timestamp: Date.now() });
-          created.push(b);
-        }
-      });
-      return created;
-    }
-    function updateVacationFlags(target) {
-      const limit = Number(target.settings?.vacationThreshold || 25);
-      const weekStart = weekStartTsFor(target);
-      target.members?.forEach(m => {
-        m.onVacation = target.history.filter(h => h.memberId === m.id && Number(h.timestamp) >= weekStart).reduce((sum, h) => sum + Number(h.fatigueAdded || 0), 0) >= limit;
-      });
-    }
-    function recalcMemberTotals() {
-      state.members.forEach(m => {
-        const mine = state.history.filter(h => h.memberId === m.id);
-        m.completedTasks = mine.length;
-        m.totalFatigue = mine.reduce((s, h) => s + Number(h.fatigueAdded || 0), 0);
-        m.xp = mine.reduce((s, h) => s + Number(h.xpEarned || 0), 0);
-        m.stickers = mine.length;
-      });
-    }
-    function buildDailySummary() {
-      const start = startOfDay(Date.now());
-      const tasks = state.history.filter(h => h.timestamp >= start).map(h => {
-        const m = member(h.memberId);
-        return { memberName: m?.name || h.memberId, memberEmoji: m?.emoji || 'U', choreName: h.choreName || chore(h.choreId)?.name || 'Task', choreEmoji: h.choreEmoji || chore(h.choreId)?.emoji || 'OK', xp: h.xpEarned || 0, time: formatClock(h.timestamp) };
-      });
-      const messages = state.messages.filter(m => m.timestamp >= start).map(msg => {
-        const from = member(msg.fromId);
-        const to = msg.toId ? member(msg.toId) : null;
-        return { from: from?.name || msg.fromId, fromEmoji: from?.emoji || 'AD', to: to?.name || 'All', text: msg.text, time: formatClock(msg.timestamp) };
-      });
-      return { date: dateKey(Date.now()), tasks, messages };
-    }
-
-    function messageOptions() { return `<option value="">All</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
+    function messageOptions() { return `<option value="">전체</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
     function firstAllowedMember() { return state.members.find(canActAs); }
     function canActAs(m) {
       if (!m || !session) return false;
@@ -973,14 +1062,14 @@
     function entriesByDate(key) { return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => a.timestamp - b.timestamp); }
     function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
     function dateKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-    function formatClock(ts) { return new Date(Number(ts)).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); }
+    function formatClock(ts) { return new Date(Number(ts)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }); }
     function formatTime(ts) { return `${dateKey(ts)} ${formatClock(ts)}`; }
     function readJson(text) { try { return JSON.parse(text); } catch { return null; } }
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
     function clamp(n, min, max) { return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min)); }
     function softColor(color = '#2563eb') { return `${color}18`; }
     function randomColor() { return ['#2563eb', '#0f9f8f', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'][Math.floor(Math.random() * 6)]; }
-    function setStatus(text) { $('syncStatus').textContent = `${text} / ${API_MODE ? location.host : 'file'}`; }
+    function setStatus(text) { $('syncStatus').textContent = `${text} / ${storageProvider?.label || '시작 중'}`; }
     function toast(text) {
       const el = $('toast');
       el.textContent = text;
@@ -993,6 +1082,436 @@
       $('successTitle').textContent = title;
       $('successMessage').textContent = message;
       $('successOverlay').hidden = false;
+    }
+
+    let currentProof = null;
+    let currentProofPromise = null;
+    const REVIEW_STATUS = {
+      pending: { label: '확인 대기', className: 'amber' },
+      approved: { label: '확인됨', className: 'teal' },
+      rejected: { label: '다시 확인', className: 'red' }
+    };
+
+    function normalizeState(next) {
+      const base = defaultState();
+      const merged = { ...base, ...(next || {}) };
+      merged.settings = { ...base.settings, ...(next?.settings || {}) };
+      merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m })) : base.members;
+      merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
+      merged.accounts = Array.isArray(next?.accounts) && next.accounts.length ? next.accounts : base.accounts;
+      merged.history = Array.isArray(next?.history) ? next.history.map(normalizeHistoryEntry) : [];
+      merged.messages = Array.isArray(next?.messages) ? next.messages : [];
+      merged.tomorrowPlans = Array.isArray(next?.tomorrowPlans) ? next.tomorrowPlans.map(normalizePlan) : [];
+      merged.badgeHistory = Array.isArray(next?.badgeHistory) ? next.badgeHistory : [];
+      updateVacationFlags(merged);
+      return merged;
+    }
+
+    function normalizeHistoryEntry(entry) {
+      const status = entry.verificationStatus || (entry.reviewedAt ? 'approved' : 'approved');
+      return {
+        reviewerId: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: '',
+        proofImage: '',
+        proofImageName: '',
+        proofCaption: '',
+        proofAnalysis: '',
+        ...entry,
+        verificationStatus: status
+      };
+    }
+
+    function normalizePlan(plan) {
+      return { status: 'open', note: '', createdAt: Date.now(), ...plan };
+    }
+
+    function renderHome() {
+      const today = todayHistory();
+      const approved = today.filter(x => x.verificationStatus === 'approved');
+      const pending = pendingReviews();
+      const leader = workRanking(approved)[0];
+      const tomorrow = tomorrowPlansFor(tomorrowDateKey()).filter(p => p.status === 'open');
+      $('section-home').innerHTML = `
+        <div class="grid">
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">오늘 요약</div><span class="tag blue">v${state.version || 0}</span></div>
+            <div class="metric-row">
+              <div class="metric"><span>기록</span><strong>${today.length}</strong></div>
+              <div class="metric"><span>확인 완료</span><strong>${approved.length}</strong></div>
+              <div class="metric"><span>확인 대기</span><strong>${pending.length}</strong></div>
+            </div>
+          </div>
+          <div class="panel span-7">
+            <div class="panel-head"><div class="panel-title">오늘 누가 더 많이 했나</div><span class="mini">확인 완료 기준</span></div>
+            ${leader ? `<div class="rank-row"><div class="avatar" style="background:${softColor(leader.member?.color)}">${escapeHtml(leader.member?.emoji || '')}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(leader.member?.name || '알 수 없음')}</strong><span class="tag teal">${leader.count}건 · 부담 ${leader.load}</span></div><div class="mini">${leader.items.map(x => escapeHtml(x.choreName)).join(', ')}</div></div></div>` : '<div class="empty">아직 확인 완료된 기록이 없어요</div>'}
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">오늘 한 일</div></div>
+            <div class="list">${today.length ? today.map(renderActivity).join('') : '<div class="empty">오늘 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">내일 할 일</div><span class="tag">${tomorrow.length}</span></div>
+            <div class="list">${tomorrow.length ? tomorrow.map(renderPlan).join('') : '<div class="empty">내일 등록된 일이 없어요</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderTasks() {
+      const allowed = firstAllowedMember();
+      if (!selectedMemberId || !canActAs(member(selectedMemberId))) selectedMemberId = allowed?.id || state.members[0]?.id;
+      const chores = state.chores.filter(c => selectedCategory === 'all' || c.category === selectedCategory);
+      if (!selectedChoreId || !chores.find(c => c.id === selectedChoreId)) selectedChoreId = chores[0]?.id || null;
+      const reviewers = reviewableMembers(selectedMemberId);
+      $('section-tasks').innerHTML = `
+        <div class="grid">
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">누가 했나요</div></div>
+            <div class="selector-grid">${state.members.map(renderMemberSelect).join('')}</div>
+          </div>
+          <div class="panel span-7">
+            <div class="panel-head"><div class="panel-title">무슨 일을 했나요</div></div>
+            <div class="segmented" style="margin-bottom:10px;">${Object.entries(CATEGORIES).map(([id, label]) => `<button class="chip ${selectedCategory === id ? 'active' : ''}" onclick="setCategory('${id}')">${label}</button>`).join('')}</div>
+            <div class="list" data-testid="chore-list">${chores.map(renderChoreSelect).join('')}</div>
+          </div>
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">증빙과 확인 요청</div></div>
+            <div class="field">
+              <label for="reviewerId">확인할 사람</label>
+              <select id="reviewerId">${reviewers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select>
+            </div>
+            <div class="field">
+              <label for="proofPhoto">사진</label>
+              <input id="proofPhoto" data-testid="proof-photo" type="file" accept="image/*" capture="environment" onchange="handleProofSelected(event)">
+              <img id="proofPreview" class="proof-preview" hidden alt="증빙 사진">
+              <div class="mini" id="proofStatus">사진 없음</div>
+            </div>
+            <div class="field">
+              <label for="proofCaption">메모</label>
+              <textarea id="proofCaption" data-testid="proof-caption" placeholder="예: 싱크대 정리까지 끝냈음"></textarea>
+            </div>
+            <button class="btn primary full" data-testid="complete-task" onclick="completeTask()">완료 알림 보내기</button>
+          </div>
+        </div>`;
+      currentProof = null;
+      currentProofPromise = null;
+    }
+
+    function renderBadges() {
+      const pending = pendingReviews();
+      const mine = state.history
+        .filter(h => session?.isAdmin || h.reviewerId === currentMemberId())
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 30);
+      $('section-badges').innerHTML = `
+        <div class="grid">
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">확인 대기</div><span class="tag amber">${pending.length}</span></div>
+            <div class="list">${pending.length ? pending.map(renderReviewItem).join('') : '<div class="empty">확인할 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">최근 검토 기록</div></div>
+            <div class="list">${mine.length ? mine.map(renderActivity).join('') : '<div class="empty">검토 기록이 없어요</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderCalendar() {
+      const targetDate = tomorrowDateKey();
+      const plans = tomorrowPlansFor(targetDate);
+      $('section-calendar').innerHTML = `
+        <div class="grid">
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">내일 알려줄 일</div><span class="tag blue">${targetDate}</span></div>
+            <div class="field"><label for="planTo">담당</label><select id="planTo">${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="planChore">할 일</label><select id="planChore">${state.chores.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="planNote">메모</label><textarea id="planNote" data-testid="tomorrow-note" placeholder="예: 오전에 먼저 해주면 좋아"></textarea></div>
+            <button class="btn primary full" data-testid="add-tomorrow-plan" onclick="addTomorrowPlan()">내일 할 일 등록</button>
+          </div>
+          <div class="panel span-7">
+            <div class="panel-head"><div class="panel-title">내일 목록</div><span class="tag">${plans.length}</span></div>
+            <div class="list">${plans.length ? plans.map(renderPlan).join('') : '<div class="empty">등록된 내일 할 일이 없어요</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderSettings() {
+      if (!session?.isAdmin) {
+        $('section-settings').innerHTML = `<div class="panel"><div class="panel-title">설정</div><div class="empty" style="margin-top:12px;">관리자 계정이 필요합니다</div></div>`;
+        return;
+      }
+      $('section-settings').innerHTML = `
+        <div class="grid">
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">운영 설정</div></div>
+            <div class="form-grid">
+              <div class="field col-6"><label>휴식 기준</label><input id="vacationThreshold" type="number" min="5" max="100" value="${state.settings.vacationThreshold}"></div>
+              <div class="field col-6"><label>주 시작</label><select id="weekStartsOn"><option value="1" ${state.settings.weekStartsOn === 1 ? 'selected' : ''}>월요일</option><option value="0" ${state.settings.weekStartsOn === 0 ? 'selected' : ''}>일요일</option></select></div>
+              <button class="btn primary col-6" onclick="saveSettings()">저장</button>
+              <button class="btn col-6" onclick="exportDailySummary()">오늘 요약 준비</button>
+              <button class="btn danger col-6" onclick="resetWeek()">이번 주 기록 삭제</button>
+              <button class="btn danger col-6" onclick="resetAll()">전체 초기화</button>
+            </div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">가족</div></div>
+            <div class="form-grid">
+              <div class="field col-3"><label>표시</label><input id="memberEmoji" maxlength="4" value="가"></div>
+              <div class="field col-4"><label>이름</label><input id="memberName" placeholder="이름"></div>
+              <div class="field col-3"><label>권한</label><select id="memberRestricted"><option value="false">공동</option><option value="true">본인</option></select></div>
+              <button class="btn primary col-2" onclick="addMember()">추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.members.map(renderMemberSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">집안일</div></div>
+            <div class="form-grid">
+              <div class="field col-2"><label>표시</label><input id="choreEmoji" maxlength="4" value="일"></div>
+              <div class="field col-4"><label>이름</label><input id="choreName" placeholder="집안일"></div>
+              <div class="field col-3"><label>분류</label><select id="choreCategory">${Object.entries(CATEGORIES).filter(x => x[0] !== 'all').map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div>
+              <div class="field col-2"><label>부담</label><input id="choreFatigue" type="number" min="1" max="10" value="2"></div>
+              <button class="btn primary col-1" onclick="addChore()">+</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.chores.map(renderChoreSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">계정</div></div>
+            <div class="form-grid">
+              <div class="field col-3"><label>아이디</label><input id="accountId" placeholder="id"></div>
+              <div class="field col-3"><label>비밀번호</label><input id="accountPw" placeholder="password"></div>
+              <div class="field col-4"><label>연결</label><select id="accountMember"><option value="">관리자</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+              <button class="btn primary col-2" onclick="addAccount()">추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.accounts.map(renderAccountSetting).join('')}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderActivity(entry) {
+      const m = member(entry.memberId);
+      const c = chore(entry.choreId);
+      const reviewer = member(entry.reviewerId);
+      const status = statusMeta(entry.verificationStatus);
+      const proof = entry.proofImage ? `<img class="photo-cell" src="${entry.proofImage}" alt="증빙 사진">` : `<div class="photo-cell" style="display:grid;place-items:center;color:var(--muted);font-size:12px;">사진 없음</div>`;
+      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 확인자 ${escapeHtml(reviewer?.name || '미지정')} · 부담 ${entry.fatigueAdded || 0}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">검토 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
+    }
+
+    function renderReviewItem(entry) {
+      const canReview = canReviewEntry(entry);
+      return `<div class="review-row">${renderActivity(entry)}<div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
+    }
+
+    function renderPlan(plan) {
+      const to = member(plan.toId);
+      const from = member(plan.fromId);
+      const c = chore(plan.choreId);
+      const closed = plan.status !== 'open';
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(to?.name || '담당 미정')} · ${escapeHtml(plan.title || c?.name || '할 일')}</strong><span class="tag ${closed ? 'teal' : 'blue'}">${closed ? '닫힘' : '예정'}</span></div><div class="mini">${plan.targetDate} · 등록 ${escapeHtml(from?.name || '관리자')}</div>${plan.note ? `<div class="mini">${escapeHtml(plan.note)}</div>` : ''}${!closed ? `<div style="margin-top:8px;"><button class="btn" onclick="closeTomorrowPlan('${plan.id}')">닫기</button></div>` : ''}</div>`;
+    }
+
+    function renderMemberSetting(m) {
+      return `<div class="account-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? '본인/관리자 기록' : '공동 기록'}</div></div><button class="btn icon danger" onclick="removeMember('${m.id}')">X</button></div>`;
+    }
+
+    function renderChoreSetting(c) {
+      return `<div class="account-row"><div class="avatar">${escapeHtml(c.emoji)}</div><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="mini">${CATEGORIES[c.category]} · 부담 ${c.fatigue} · ${c.xp}XP</div></div><button class="btn icon danger" onclick="removeChore('${c.id}')">X</button></div>`;
+    }
+
+    function renderAccountSetting(acc) {
+      const m = member(acc.memberId);
+      const label = acc.isAdmin ? '관리자' : `${m?.emoji || ''} ${m?.name || '연결 없음'}`;
+      return `<div class="account-row"><span class="tag blue">${escapeHtml(acc.id)}</span><div class="grow">${escapeHtml(label)}<div class="mini">${acc.password.replace(/./g, '*')}</div></div><button class="btn icon danger" onclick="removeAccount('${acc.id}')">X</button></div>`;
+    }
+
+    async function handleProofSelected(event) {
+      const file = event.target.files?.[0];
+      currentProof = null;
+      currentProofPromise = null;
+      const preview = $('proofPreview');
+      const status = $('proofStatus');
+      if (!file) {
+        preview.hidden = true;
+        status.textContent = '사진 없음';
+        return;
+      }
+      status.textContent = '사진 확인 중';
+      currentProofPromise = readProofImage(file).then((proof) => {
+        currentProof = proof;
+        preview.src = proof.dataUrl;
+        preview.hidden = false;
+        status.textContent = proof.analysis;
+        return proof;
+      }).catch((err) => {
+        status.textContent = `사진 처리 실패: ${err.message}`;
+        return null;
+      });
+      await currentProofPromise;
+    }
+
+    function readProofImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!file.type.startsWith('image/')) {
+          reject(new Error('이미지 파일만 등록할 수 있습니다'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const max = 720;
+            const scale = Math.min(1, max / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', .62);
+            const kb = Math.round(file.size / 1024);
+            resolve({ dataUrl, name: file.name, analysis: `사진 ${canvas.width}x${canvas.height}, 원본 ${kb}KB, ${file.name}` });
+          };
+          img.onerror = () => reject(new Error('사진을 읽을 수 없습니다'));
+          img.src = reader.result;
+        };
+        reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function completeTask() {
+      const m = member(selectedMemberId);
+      const c = chore(selectedChoreId);
+      if (!m || !c || !canActAs(m)) return;
+      if (currentProofPromise) await currentProofPromise;
+      const reviewerId = $('reviewerId')?.value || reviewableMembers(m.id)[0]?.id || null;
+      const caption = $('proofCaption')?.value.trim() || '';
+      const entry = {
+        id: `h${Date.now()}`,
+        memberId: m.id,
+        choreId: c.id,
+        choreName: c.name,
+        choreEmoji: c.emoji,
+        category: c.category,
+        fatigueAdded: Number(c.fatigue),
+        xpEarned: Number(c.xp),
+        timestamp: Date.now(),
+        verificationStatus: 'pending',
+        reviewerId,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: '',
+        proofImage: currentProof?.dataUrl || '',
+        proofImageName: currentProof?.name || '',
+        proofCaption: caption,
+        proofAnalysis: currentProof?.analysis || (caption ? '메모만 등록됨' : '사진/메모 없음')
+      };
+      state.history.push(entry);
+      applyMemberTotals();
+      state.messages.push({ id: `msg${Date.now()}`, fromId: m.id, toId: reviewerId, text: `${m.name}님이 ${c.name} 완료 확인을 요청했습니다.`, timestamp: Date.now() });
+      await saveState(false);
+      showSuccess('기록', '확인 요청을 보냈습니다', `${c.name} 기록이 확인 대기로 저장되었습니다.`);
+    }
+
+    async function approveTask(id) {
+      const entry = state.history.find(h => h.id === id);
+      if (!entry || !canReviewEntry(entry)) return;
+      entry.verificationStatus = 'approved';
+      entry.reviewedBy = currentMemberId() || 'admin';
+      entry.reviewedAt = Date.now();
+      entry.reviewNote = prompt('확인 메모', '확인했습니다') || '확인했습니다';
+      grantBadges(member(entry.memberId));
+      applyMemberTotals();
+      await saveState(false);
+      toast('확인 완료');
+    }
+
+    async function rejectTask(id) {
+      const entry = state.history.find(h => h.id === id);
+      if (!entry || !canReviewEntry(entry)) return;
+      entry.verificationStatus = 'rejected';
+      entry.reviewedBy = currentMemberId() || 'admin';
+      entry.reviewedAt = Date.now();
+      entry.reviewNote = prompt('다시 확인할 내용', '사진이나 설명을 더 남겨주세요') || '다시 확인이 필요합니다';
+      applyMemberTotals();
+      await saveState(false);
+      toast('다시 확인 요청됨');
+    }
+
+    async function addTomorrowPlan() {
+      const toId = $('planTo')?.value;
+      const choreId = $('planChore')?.value;
+      const c = chore(choreId);
+      if (!toId || !c) return;
+      state.tomorrowPlans.push({ id: `p${Date.now()}`, fromId: currentMemberId() || 'admin', toId, choreId, title: c.name, note: $('planNote')?.value.trim() || '', targetDate: tomorrowDateKey(), status: 'open', createdAt: Date.now() });
+      await saveState(false);
+      toast('내일 할 일을 등록했습니다');
+    }
+
+    async function closeTomorrowPlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan) return;
+      plan.status = 'closed';
+      plan.closedAt = Date.now();
+      await saveState(false);
+      toast('내일 목록에서 닫았습니다');
+    }
+
+    function applyMemberTotals() {
+      state.members.forEach(m => {
+        const approved = state.history.filter(h => h.memberId === m.id && h.verificationStatus === 'approved');
+        m.completedTasks = approved.length;
+        m.totalFatigue = approved.reduce((s, h) => s + Number(h.fatigueAdded || 0), 0);
+        m.xp = approved.reduce((s, h) => s + Number(h.xpEarned || 0), 0);
+        m.stickers = approved.length;
+      });
+    }
+
+    function grantBadges(m) {
+      if (!m) return [];
+      if (!Array.isArray(m.earnedBadges)) m.earnedBadges = [];
+      const weekly = weekHistory().filter(h => h.verificationStatus === 'approved');
+      const created = [];
+      BADGES.forEach(b => {
+        if (!m.earnedBadges.includes(b.id) && b.cond(m, weekly)) {
+          m.earnedBadges.push(b.id);
+          state.badgeHistory.push({ id: `b${Date.now()}${b.id}`, memberId: m.id, badgeId: b.id, name: b.name, emoji: b.emoji || '', timestamp: Date.now() });
+          created.push(b);
+        }
+      });
+      return created;
+    }
+
+    function buildDailySummary() {
+      const tasks = todayHistory().map(h => ({ memberName: member(h.memberId)?.name || h.memberId, choreName: h.choreName, status: statusMeta(h.verificationStatus).label, reviewer: member(h.reviewerId)?.name || '', time: formatClock(h.timestamp) }));
+      const tomorrow = tomorrowPlansFor(tomorrowDateKey()).map(p => ({ to: member(p.toId)?.name || p.toId, title: p.title, note: p.note }));
+      return { date: dateKey(Date.now()), tasks, tomorrow };
+    }
+
+    function updateVacationFlags(target) {
+      const limit = Number(target.settings?.vacationThreshold || 25);
+      const weekStart = weekStartTsFor(target);
+      target.members?.forEach(m => {
+        m.onVacation = target.history.filter(h => h.memberId === m.id && h.verificationStatus === 'approved' && Number(h.timestamp) >= weekStart).reduce((sum, h) => sum + Number(h.fatigueAdded || 0), 0) >= limit;
+      });
+    }
+
+    function currentMemberId() { return session?.memberId || null; }
+    function canReviewEntry(entry) { return !!session && (session.isAdmin || (entry.reviewerId === session.memberId && entry.memberId !== session.memberId)); }
+    function reviewableMembers(memberId) { return state.members.filter(m => m.id !== memberId); }
+    function pendingReviews() { return state.history.filter(h => h.verificationStatus === 'pending' && (!session || session.isAdmin || h.reviewerId === session.memberId)).sort((a, b) => b.timestamp - a.timestamp); }
+    function todayHistory() { const key = dateKey(Date.now()); return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => b.timestamp - a.timestamp); }
+    function tomorrowDateKey() { const d = new Date(); d.setDate(d.getDate() + 1); return dateKey(d.getTime()); }
+    function tomorrowPlansFor(key) { return state.tomorrowPlans.filter(p => p.targetDate === key).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)); }
+    function statusMeta(status) { return REVIEW_STATUS[status] || REVIEW_STATUS.pending; }
+    function workRanking(items) {
+      const map = new Map();
+      items.forEach(item => {
+        const current = map.get(item.memberId) || { member: member(item.memberId), count: 0, load: 0, items: [] };
+        current.count += 1;
+        current.load += Number(item.fatigueAdded || 0);
+        current.items.push(item);
+        map.set(item.memberId, current);
+      });
+      return [...map.values()].sort((a, b) => b.load - a.load || b.count - a.count);
     }
   </script>
 </body>

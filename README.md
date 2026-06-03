@@ -1,42 +1,65 @@
 # ForHome
 
-ForHome is a local family chore web app. The PC runs the server, PostgreSQL stores the app data, and browsers on the same network can use the app from desktop or mobile.
+ForHome is a family chore web app deployed as a static Firebase Hosting app. Firebase Auth signs family members in, Cloud Firestore stores shared app data, and GitHub Actions writes dated JSON/Markdown backups.
 
 ## Folder Layout
 
-- `code/`: browser client code
-- `server/`: PowerShell server, PostgreSQL access layer, Kakao scripts, SQL schema
-- `data/`: local runtime config and generated exports
+- `code/`: browser client code served by Firebase Hosting
+- `server/`: local PowerShell static server for Playwright and LAN smoke checks
+- `scripts/`: automation scripts such as Firestore backup export
+- `data/`: generated exports and backup output
 - `log/`: local runtime logs and Playwright reports
-- `tests/`: structure tests and Playwright E2E tests
+- `tests/`: structure tests, fixtures, and Playwright E2E tests
 - `docs/`: requirements and Codex session notes
 
-## PostgreSQL Setup
+## Firebase Setup
 
-Install PostgreSQL and make sure `psql` is available from PowerShell.
+The default Firebase project is `forhome-19317`.
 
-Copy the example config:
+Create these Firebase Auth email/password users:
 
-```powershell
-Copy-Item data\db.env.example.ps1 data\db.env.ps1
+```text
+admin@forhome.local / admin1234
+mom@forhome.local / mom1234
+dad@forhome.local / dad1234
+son@forhome.local / son1234
 ```
 
-Edit `data\db.env.ps1` for your PostgreSQL connection:
+Deploy Firestore rules and hosting with the Firebase CLI:
 
 ```powershell
-$env:PGHOST = "localhost"
-$env:PGPORT = "5432"
-$env:PGDATABASE = "forhome"
-$env:PGUSER = "postgres"
-$env:PGPASSWORD = "your-password"
+firebase deploy --only firestore:rules,hosting
 ```
 
-The server creates the `forhome` database when possible, applies `server/sql/schema.sql`, and seeds default family members, accounts, and chores.
+The first admin login seeds the shared Firestore document:
 
-## Run
+```text
+families/forhome/state/app
+```
 
-```powershell
-server\start_server.bat
+## GitHub Backup
+
+The workflow `.github/workflows/firestore-backup.yml` runs daily at `15:10 UTC`, which is `00:10 KST`, and writes:
+
+```text
+data/backups/YYYY-MM-DD/state.json
+reports/daily/YYYY-MM-DD.md
+```
+
+Add this repository secret before enabling the workflow:
+
+```text
+FIREBASE_SERVICE_ACCOUNT_JSON
+```
+
+The value must be a Firebase service account JSON with permission to read Firestore.
+
+## Local Test Server
+
+For local development and Playwright checks, run:
+
+```bash
+npm run dev:local
 ```
 
 Then open:
@@ -44,29 +67,30 @@ Then open:
 - PC: `http://localhost:8080`
 - Mobile: use the LAN URL printed by the server window
 
-Default accounts:
+Localhost automatically uses a browser localStorage mock and does not call Firebase. You can also force modes explicitly:
 
-- `admin` / `admin1234`
-- `mom` / `mom1234`
-- `dad` / `dad1234`
-- `son` / `son1234`
+```text
+http://localhost:8080/?storage=test
+http://localhost:8080/?storage=firebase
+```
+
+`npm run dev` is an alias for the same local server.
+
+If Node/npm is not installed, the same server can still be started directly:
+
+```powershell
+server\start_server.bat
+```
 
 ## Tests
 
-Run always-available structure and syntax tests:
+Run structure and dry-run backup checks:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
 ```
 
-After PostgreSQL and `psql` are configured, run DB integration checks too:
-
-```powershell
-$env:RUN_DB_TESTS = "1"
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
-```
-
-Playwright E2E requires Node/npm and browser binaries:
+Run Playwright E2E after installing Node dependencies and browser binaries:
 
 ```powershell
 npm install

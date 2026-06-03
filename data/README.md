@@ -1,7 +1,17 @@
 # data
 
-This folder is for runtime configuration and generated exports only.
+This folder is for generated local artifacts and committed backup output.
 
-Application data is stored in PostgreSQL tables, not in JSON files.
+Production application data is stored in Cloud Firestore:
 
-Copy `db.env.example.ps1` to `db.env.ps1` and edit it for your local PostgreSQL connection. `db.env.ps1` is ignored by Git because it may contain a password.
+```text
+families/forhome/state/app
+```
+
+GitHub Actions writes dated backup files under:
+
+```text
+data/backups/YYYY-MM-DD/state.json
+```
+
+Files under `data/exports` are local integration artifacts and are not the primary application data store.

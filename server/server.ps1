@@ -6,37 +6,22 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
 $ClientRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "code"))
-$ExportDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "data\exports"))
 $LogDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "log"))
-$SummaryPath = Join-Path $ExportDir "daily_summary.json"
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
-. (Join-Path $ScriptDir "db.ps1")
-
-function Write-Utf8File($Path, $Text) {
-    $dir = Split-Path -Parent $Path
-    if ($dir -and -not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    }
-    [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom)
-}
 
 function Write-AppLog($Message) {
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
     }
-    $line = "$(Get-Date -Format o) $Message"
-    Add-Content -Path (Join-Path $LogDir "server.log") -Value $line -Encoding UTF8
+    Add-Content -Path (Join-Path $LogDir "server.log") -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
 }
 
 function Get-ReasonPhrase($Status) {
     switch ($Status) {
         200 { "OK" }
-        201 { "Created" }
         204 { "No Content" }
-        400 { "Bad Request" }
         404 { "Not Found" }
         405 { "Method Not Allowed" }
+        410 { "Gone" }
         500 { "Internal Server Error" }
         default { "OK" }
     }
@@ -45,7 +30,7 @@ function Get-ReasonPhrase($Status) {
 function Send-Bytes($Client, $Status, $ContentType, [byte[]]$Bytes) {
     $stream = $Client.GetStream()
     $reason = Get-ReasonPhrase $Status
-    $headers = "HTTP/1.1 $Status $reason`r`nContent-Type: $ContentType`r`nContent-Length: $($Bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Headers: Content-Type`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nCache-Control: no-store`r`nConnection: close`r`n`r`n"
+    $headers = "HTTP/1.1 $Status $reason`r`nContent-Type: $ContentType`r`nContent-Length: $($Bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Headers: Content-Type`r`nAccess-Control-Allow-Methods: GET, OPTIONS`r`nCache-Control: no-store`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($headers)
     $stream.Write($headerBytes, 0, $headerBytes.Length)
     if ($Bytes.Length -gt 0) {
@@ -59,11 +44,7 @@ function Send-Text($Client, $Status, $ContentType, $Text) {
 }
 
 function Send-Json($Client, $Status, $Object) {
-    $json = $Object
-    if ($Object -isnot [string]) {
-        $json = $Object | ConvertTo-Json -Depth 60
-    }
-    Send-Text $Client $Status "application/json; charset=utf-8" $json
+    Send-Text $Client $Status "application/json; charset=utf-8" ($Object | ConvertTo-Json -Depth 20)
 }
 
 function Find-HeaderEnd([byte[]]$Bytes) {
@@ -91,48 +72,14 @@ function Read-HttpRequest($Client) {
     }
 
     $all = $memory.ToArray()
-    if ($headerEnd -lt 0) {
-        throw "Invalid HTTP request"
-    }
-
+    if ($headerEnd -lt 0) { throw "Invalid HTTP request" }
     $headerText = [System.Text.Encoding]::UTF8.GetString($all, 0, $headerEnd)
-    $lines = $headerText -split "`r?`n"
-    $first = $lines[0] -split " "
-    if ($first.Length -lt 2) {
-        throw "Invalid HTTP request line"
-    }
-
-    $headers = @{}
-    for ($i = 1; $i -lt $lines.Length; $i++) {
-        $line = $lines[$i]
-        $idx = $line.IndexOf(":")
-        if ($idx -gt 0) {
-            $headers[$line.Substring(0, $idx).Trim().ToLowerInvariant()] = $line.Substring($idx + 1).Trim()
-        }
-    }
-
-    $bodyStart = $headerEnd + 4
-    $contentLength = 0
-    if ($headers.ContainsKey("content-length")) {
-        $contentLength = [int]$headers["content-length"]
-    }
-    while (($memory.Length - $bodyStart) -lt $contentLength) {
-        $read = $stream.Read($buffer, 0, $buffer.Length)
-        if ($read -le 0) { break }
-        $memory.Write($buffer, 0, $read)
-    }
-
-    $all = $memory.ToArray()
-    $body = ""
-    if ($contentLength -gt 0) {
-        $body = [System.Text.Encoding]::UTF8.GetString($all, $bodyStart, $contentLength)
-    }
+    $first = ($headerText -split "`r?`n")[0] -split " "
+    if ($first.Length -lt 2) { throw "Invalid HTTP request line" }
 
     [pscustomobject]@{
         Method = $first[0].ToUpperInvariant()
         Path = $first[1]
-        Headers = $headers
-        Body = $body
     }
 }
 
@@ -162,47 +109,9 @@ function Send-StaticFile($Client, $RequestPath) {
         return
     }
     if (-not (Test-Path $full) -or (Get-Item $full).PSIsContainer) {
-        Send-Json $Client 404 @{ error = "not_found" }
-        return
+        $full = Join-Path $ClientRoot "index.html"
     }
     Send-Bytes $Client 200 (Get-MimeType $full) ([System.IO.File]::ReadAllBytes($full))
-}
-
-function Handle-Api($Client, $Request) {
-    if ($Request.Method -eq "OPTIONS") {
-        Send-Text $Client 204 "text/plain; charset=utf-8" ""
-        return
-    }
-
-    $pathOnly = ($Request.Path -split "\?")[0]
-    if ($Request.Method -eq "GET" -and $pathOnly -eq "/api/health") {
-        Send-Json $Client 200 @{ ok = $true; storage = "postgresql"; time = [DateTime]::Now.ToString("o"); port = $Port }
-        return
-    }
-    if ($Request.Method -eq "GET" -and $pathOnly -eq "/api/state") {
-        Send-Json $Client 200 (Get-DbState)
-        return
-    }
-    if ($Request.Method -eq "POST" -and $pathOnly -eq "/api/state") {
-        try {
-            Send-Json $Client 200 (Set-DbState $Request.Body)
-        } catch {
-            Write-AppLog "state save failed: $_"
-            Send-Json $Client 400 @{ error = "invalid_state"; message = "$_" }
-        }
-        return
-    }
-    if ($Request.Method -eq "POST" -and $pathOnly -eq "/api/daily-summary") {
-        try {
-            $Request.Body | ConvertFrom-Json | Out-Null
-            Write-Utf8File $SummaryPath $Request.Body
-            Send-Json $Client 200 @{ ok = $true; path = $SummaryPath }
-        } catch {
-            Send-Json $Client 400 @{ error = "invalid_summary"; message = "$_" }
-        }
-        return
-    }
-    Send-Json $Client 404 @{ error = "not_found" }
 }
 
 function Get-LocalIPv4 {
@@ -212,24 +121,29 @@ function Get-LocalIPv4 {
     return "127.0.0.1"
 }
 
-Initialize-Database
 $listener = New-Object System.Net.Sockets.TcpListener -ArgumentList ([System.Net.IPAddress]::Any), $Port
 $listener.Start()
 $ip = Get-LocalIPv4
 Write-Host ""
-Write-Host "ForHome server is running with PostgreSQL."
+Write-Host "ForHome static test server is running."
 Write-Host "PC:     http://localhost:$Port"
 Write-Host "Mobile: http://$ip`:$Port"
+Write-Host "Mode:   localhost uses local mock storage by default"
 Write-Host "Stop:   Ctrl + C"
 Write-Host ""
-Write-AppLog "server started on port $Port"
+Write-AppLog "static test server started on port $Port"
 
 while ($true) {
     $client = $listener.AcceptTcpClient()
     try {
         $request = Read-HttpRequest $client
-        if (($request.Path -split "\?")[0].StartsWith("/api/")) {
-            Handle-Api $client $request
+        $pathOnly = ($request.Path -split "\?")[0]
+        if ($request.Method -eq "OPTIONS") {
+            Send-Text $client 204 "text/plain; charset=utf-8" ""
+        } elseif ($request.Method -eq "GET" -and $pathOnly -eq "/api/health") {
+            Send-Json $client 200 @{ ok = $true; storage = "firebase-firestore"; mode = "static-test"; port = $Port }
+        } elseif ($pathOnly.StartsWith("/api/")) {
+            Send-Json $client 410 @{ error = "api_removed"; message = "Production storage uses Firebase Firestore." }
         } elseif ($request.Method -eq "GET") {
             Send-StaticFile $client $request.Path
         } else {

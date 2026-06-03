@@ -1,0 +1,75 @@
+{
+  "version": 7,
+  "updatedAt": "2026-06-03T00:00:00.000Z",
+  "settings": {
+    "vacationThreshold": 25,
+    "weekStartsOn": 1
+  },
+  "members": [
+    {
+      "id": "mom",
+      "name": "Mom",
+      "emoji": "M"
+    },
+    {
+      "id": "son",
+      "name": "Son",
+      "emoji": "S"
+    }
+  ],
+  "accounts": [],
+  "chores": [
+    {
+      "id": "c1",
+      "name": "Dishes",
+      "emoji": "DI",
+      "fatigue": 2,
+      "xp": 20,
+      "category": "house"
+    }
+  ],
+  "history": [
+    {
+      "id": "h1",
+      "memberId": "mom",
+      "choreId": "c1",
+      "choreName": "Dishes",
+      "choreEmoji": "DI",
+      "category": "house",
+      "fatigueAdded": 2,
+      "xpEarned": 20,
+      "timestamp": 1780416000000,
+      "verificationStatus": "approved",
+      "reviewerId": "son",
+      "reviewedBy": "son",
+      "reviewedAt": 1780417800000,
+      "reviewNote": "Looks done",
+      "proofImage": "",
+      "proofCaption": "Sink is clear",
+      "proofAnalysis": "memo only"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "fromId": "son",
+      "toId": null,
+      "text": "Thanks!",
+      "timestamp": 1780419600000
+    }
+  ],
+  "tomorrowPlans": [
+    {
+      "id": "p1",
+      "fromId": "mom",
+      "toId": "son",
+      "choreId": "c1",
+      "title": "Dishes",
+      "note": "Please do it after dinner",
+      "targetDate": "2026-06-04",
+      "status": "open",
+      "createdAt": 1780419900000
+    }
+  ],
+  "badgeHistory": []
+}
