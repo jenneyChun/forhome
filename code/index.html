@@ -256,6 +256,7 @@
     .tag.teal { color: var(--teal); background: var(--teal-soft); }
     .tag.amber { color: #a16207; background: var(--amber-soft); }
     .tag.red { color: var(--red); background: var(--red-soft); }
+    .tag.gray { color: var(--muted); background: #eef2f7; }
     .btn {
       min-height: 38px;
       border: 1px solid var(--line);
@@ -316,6 +317,8 @@
     .day.out { opacity: .42; }
     .dot-row { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; }
     .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--amber); }
+    .dot.teal { background: var(--teal); }
+    .dot.blue { background: var(--blue); }
     .badge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; }
     .badge-item { min-height: 112px; display: grid; gap: 6px; align-content: start; }
     .badge-item.locked { opacity: .42; }
@@ -373,6 +376,28 @@
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 8px;
+    }
+    .approval-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .briefing-list {
+      display: grid;
+      gap: 7px;
+      margin-top: 8px;
+    }
+    .briefing-item {
+      border: 1px solid #edf2f7;
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 8px;
+    }
+    .time-total {
+      font-size: 24px;
+      font-weight: 900;
+      line-height: 1.1;
     }
     .review-row, .plan-row {
       border: 1px solid var(--line);
@@ -524,11 +549,15 @@
     const AUTH_EMAIL_DOMAIN = 'forhome.local';
     const SESSION_KEY = 'forhome-session-v1';
     const TEST_STORAGE_KEY = 'forhome-test-state-v1';
-    const STORAGE_MODE = new URLSearchParams(location.search).get('storage');
+    const URL_PARAMS = new URLSearchParams(location.search);
+    const STORAGE_MODE = URL_PARAMS.get('storage');
+    const FORCED_NOW = URL_PARAMS.get('now');
     const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
     const TEST_MODE = STORAGE_MODE === 'test'
       || (!STORAGE_MODE && LOCAL_HOSTS.has(location.hostname))
       || window.__FORHOME_TEST__ === true;
+    const PARENT_IDS = ['mom', 'dad'];
+    const BRIEFING_HOUR = 7;
     const CATEGORIES = { all: '전체', house: '집안', care: '돌봄', pet: '반려동물', child: '아이' };
     const BADGES = [
       { id: 'first', emoji: 'B1', name: 'First task', desc: 'Complete one task this week', cond: (m, h) => countFor(m, h) >= 1 },
@@ -559,11 +588,14 @@
         choreSeed('c3', '빨래', '빨', 2, 'house'),
         choreSeed('p1', '약 챙기기', '약', 2, 'care'),
         choreSeed('pet1', '밥 주기', '밥', 1, 'pet'),
-        choreSeed('ch1', '방 정리', '방', 1, 'child')
+        choreSeed('ch1', '방 정리', '방', 1, 'child'),
+        choreSeed('hw1', '숙제 확인', '숙', 2, 'child')
       ],
       history: [],
       messages: [],
       tomorrowPlans: [],
+      careAssignments: [],
+      careSessions: [],
       badgeHistory: []
     });
     function memberSeed(id, name, emoji, restricted, color) {
@@ -581,7 +613,7 @@
     let selectedCategory = 'all';
     let badgeMemberId = null;
     let calendarMonth = new Date();
-    let selectedDate = dateKey(Date.now());
+    let selectedDate = dateKey(nowMs());
     let saving = false;
     let storageProvider = null;
     let unsubscribeState = null;
@@ -815,6 +847,29 @@
       render();
     }
 
+    async function saveStateOptimistic(doneText = '') {
+      saving = true;
+      state.updatedAt = new Date().toISOString();
+      updateVacationFlags(state);
+      setStatus('저장 중');
+      render();
+      try {
+        state = normalizeState(await storageProvider.saveState(state));
+        setStatus(`동기화됨 v${state.version || 0}`);
+        if (doneText) toast(doneText);
+      } catch (err) {
+        setStatus('저장 실패');
+        toast(`저장 실패: ${err.message}`);
+        try {
+          state = normalizeState(await storageProvider.loadState());
+          setStatus(`다시 불러옴 v${state.version || 0}`);
+        } catch {}
+      } finally {
+        saving = false;
+      }
+      render();
+    }
+
     function startStateSubscription() {
       if (unsubscribeState) unsubscribeState();
       unsubscribeState = storageProvider.subscribeState((remoteState) => {
@@ -941,11 +996,13 @@
     function renderDay(d, currentMonth) {
       const key = dateKey(d.getTime());
       const entries = entriesByDate(key);
+      const sessions = careSessionsFor(key);
+      const acceptedPlans = plansForDate(key).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
       const classes = ['day'];
       if (d.getMonth() !== currentMonth) classes.push('out');
-      if (key === dateKey(Date.now())) classes.push('today');
+      if (key === dateKey(nowMs())) classes.push('today');
       if (key === selectedDate) classes.push('active');
-      return `<button class="${classes.join(' ')}" onclick="selectDate('${key}')"><strong>${d.getDate()}</strong><div class="dot-row">${entries.slice(0, 8).map(() => '<span class="dot"></span>').join('')}</div></button>`;
+      return `<button class="${classes.join(' ')}" onclick="selectDate('${key}')"><strong>${d.getDate()}</strong><div class="dot-row">${entries.slice(0, 5).map(() => '<span class="dot"></span>').join('')}${sessions.slice(0, 2).map(() => '<span class="dot teal"></span>').join('')}${acceptedPlans.slice(0, 2).map(() => '<span class="dot blue"></span>').join('')}</div></button>`;
     }
 
     function selectMember(id) { selectedMemberId = id; renderTasks(); }
@@ -983,6 +1040,9 @@
       state.members = state.members.filter(m => m.id !== id);
       state.history = state.history.filter(h => h.memberId !== id);
       state.messages = state.messages.filter(m => m.fromId !== id && m.toId !== id);
+      state.tomorrowPlans = state.tomorrowPlans.filter(p => p.fromId !== id && p.toId !== id);
+      state.careAssignments = state.careAssignments.filter(a => a.morningId !== id && a.eveningId !== id);
+      state.careSessions = state.careSessions.filter(s => s.memberId !== id);
       state.accounts = state.accounts.map(a => a.memberId === id ? { ...a, memberId: null, isAdmin: true } : a);
       await saveState();
     }
@@ -1035,6 +1095,8 @@
     }
 
     function messageOptions() { return `<option value="">전체</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
+    function parentMembers() { return PARENT_IDS.map(id => member(id)).filter(Boolean); }
+    function parentOptions(selected = '') { return parentMembers().map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join(''); }
     function firstAllowedMember() { return state.members.find(canActAs); }
     function canActAs(m) {
       if (!m || !session) return false;
@@ -1042,6 +1104,8 @@
       if (session.memberId === m.id) return true;
       return !m.restricted;
     }
+    function canEditCare() { return !!session && (session.isAdmin || PARENT_IDS.includes(session.memberId)); }
+    function canRespondPlan(plan) { return !!session && (session.isAdmin || plan.toId === session.memberId); }
     function account(id) { return state.accounts.find(a => a.id === id); }
     function member(id) { return state.members.find(m => m.id === id); }
     function chore(id) { return state.chores.find(c => c.id === id); }
@@ -1060,10 +1124,34 @@
       return d.getTime();
     }
     function entriesByDate(key) { return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => a.timestamp - b.timestamp); }
+    function plansForDate(key) { return state.tomorrowPlans.filter(p => p.targetDate === key).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)); }
+    function careAssignmentFor(key) { return state.careAssignments.find(a => a.date === key) || { date: key, morningId: 'mom', eveningId: 'dad', updatedAt: null }; }
+    function careSessionsFor(key) { return state.careSessions.filter(s => s.date === key).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime))); }
+    function careMinutesFor(key) { return careSessionsFor(key).reduce((sum, s) => sum + Number(s.minutes || 0), 0); }
+    function careMinutesByMember(key) {
+      const result = {};
+      careSessionsFor(key).forEach(s => { result[s.memberId] = (result[s.memberId] || 0) + Number(s.minutes || 0); });
+      return result;
+    }
     function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    function nowMs() { return FORCED_NOW ? new Date(FORCED_NOW).getTime() : Date.now(); }
     function dateKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+    function addDaysKey(key, days) { const d = new Date(`${key}T00:00:00`); d.setDate(d.getDate() + days); return dateKey(d.getTime()); }
     function formatClock(ts) { return new Date(Number(ts)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }); }
     function formatTime(ts) { return `${dateKey(ts)} ${formatClock(ts)}`; }
+    function formatMinutes(minutes) {
+      const value = Math.max(0, Number(minutes || 0));
+      const h = Math.floor(value / 60);
+      const m = value % 60;
+      if (h && m) return `${h}시간 ${m}분`;
+      if (h) return `${h}시간`;
+      return `${m}분`;
+    }
+    function minutesBetween(start, end) {
+      const [sh, sm] = String(start || '00:00').split(':').map(Number);
+      const [eh, em] = String(end || '00:00').split(':').map(Number);
+      return (eh * 60 + em) - (sh * 60 + sm);
+    }
     function readJson(text) { try { return JSON.parse(text); } catch { return null; } }
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
     function clamp(n, min, max) { return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min)); }
@@ -1091,6 +1179,58 @@
       approved: { label: '확인됨', className: 'teal' },
       rejected: { label: '다시 확인', className: 'red' }
     };
+    const REQUEST_STATUS = {
+      pending: { label: '승인 대기', className: 'amber' },
+      accepted: { label: '오늘 할 일', className: 'teal' },
+      declined: { label: '거절됨', className: 'red' }
+    };
+
+    function requiredReviewersFor(memberId, category) {
+      if (category === 'child' && memberId === 'son') return parentMembers().length ? parentMembers().map(m => m.id) : PARENT_IDS;
+      if (memberId === 'mom' && member('dad')) return ['dad'];
+      if (memberId === 'dad' && member('mom')) return ['mom'];
+      if (category === 'child') return PARENT_IDS.filter(id => id !== memberId && member(id));
+      return reviewableMembers(memberId).slice(0, 1).map(m => m.id);
+    }
+
+    function approvalStatusFor(entry) {
+      const requests = Array.isArray(entry.approvalRequests) ? entry.approvalRequests : [];
+      if (!requests.length) return 'approved';
+      if (requests.some(r => r.status === 'rejected')) return 'rejected';
+      if (requests.every(r => r.status === 'approved')) return 'approved';
+      return 'pending';
+    }
+
+    function syncEntryReviewStatus(entry) {
+      entry.verificationStatus = approvalStatusFor(entry);
+      const first = entry.approvalRequests?.[0];
+      entry.reviewerId = first?.reviewerId || entry.reviewerId || null;
+      const latestReviewed = [...(entry.approvalRequests || [])].filter(r => r.reviewedAt).sort((a, b) => Number(b.reviewedAt) - Number(a.reviewedAt))[0];
+      entry.reviewedBy = latestReviewed?.reviewerId || entry.reviewedBy || null;
+      entry.reviewedAt = latestReviewed?.reviewedAt || entry.reviewedAt || null;
+      entry.reviewNote = latestReviewed?.reviewNote || entry.reviewNote || '';
+      return entry.verificationStatus;
+    }
+
+    function requestMeta(status) { return REQUEST_STATUS[status] || REQUEST_STATUS.pending; }
+
+    function reviewTargetsFor(entry) {
+      const requests = entry.approvalRequests || [];
+      if (session?.isAdmin) return requests.filter(r => r.status === 'pending');
+      return requests.filter(r => r.reviewerId === session?.memberId && r.status === 'pending');
+    }
+
+    function promptRequired(title, defaultValue) {
+      let value = prompt(title, defaultValue);
+      if (value === null) return '';
+      value = value.trim();
+      while (!value) {
+        value = prompt('이유를 입력해 주세요', defaultValue);
+        if (value === null) return '';
+        value = value.trim();
+      }
+      return value;
+    }
 
     function normalizeState(next) {
       const base = defaultState();
@@ -1098,18 +1238,23 @@
       merged.settings = { ...base.settings, ...(next?.settings || {}) };
       merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m })) : base.members;
       merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
+      base.chores.forEach(seed => {
+        if (!merged.chores.some(c => c.id === seed.id)) merged.chores.push(seed);
+      });
       merged.accounts = Array.isArray(next?.accounts) && next.accounts.length ? next.accounts : base.accounts;
       merged.history = Array.isArray(next?.history) ? next.history.map(normalizeHistoryEntry) : [];
       merged.messages = Array.isArray(next?.messages) ? next.messages : [];
       merged.tomorrowPlans = Array.isArray(next?.tomorrowPlans) ? next.tomorrowPlans.map(normalizePlan) : [];
+      merged.careAssignments = Array.isArray(next?.careAssignments) ? next.careAssignments.map(normalizeCareAssignment) : [];
+      merged.careSessions = Array.isArray(next?.careSessions) ? next.careSessions.map(normalizeCareSession).filter(Boolean) : [];
       merged.badgeHistory = Array.isArray(next?.badgeHistory) ? next.badgeHistory : [];
       updateVacationFlags(merged);
       return merged;
     }
 
     function normalizeHistoryEntry(entry) {
-      const status = entry.verificationStatus || (entry.reviewedAt ? 'approved' : 'approved');
-      return {
+      const requests = normalizeApprovalRequests(entry);
+      const normalized = {
         reviewerId: null,
         reviewedBy: null,
         reviewedAt: null,
@@ -1119,12 +1264,58 @@
         proofCaption: '',
         proofAnalysis: '',
         ...entry,
-        verificationStatus: status
+        approvalRequests: requests
       };
+      syncEntryReviewStatus(normalized);
+      return normalized;
+    }
+
+    function normalizeApprovalRequests(entry) {
+      if (Array.isArray(entry?.approvalRequests) && entry.approvalRequests.length) {
+        return entry.approvalRequests.map(r => ({
+          reviewerId: r.reviewerId,
+          status: r.status || 'pending',
+          reviewedAt: r.reviewedAt || null,
+          reviewNote: r.reviewNote || ''
+        })).filter(r => r.reviewerId);
+      }
+      const required = requiredReviewersFor(entry?.memberId, entry?.category);
+      const fallback = entry?.reviewerId ? [entry.reviewerId] : required;
+      return [...new Set(fallback.filter(Boolean))].map(id => ({
+        reviewerId: id,
+        status: entry?.verificationStatus === 'approved' || entry?.reviewedAt ? 'approved' : (entry?.verificationStatus === 'rejected' ? 'rejected' : 'pending'),
+        reviewedAt: entry?.reviewedAt || null,
+        reviewNote: entry?.reviewNote || ''
+      }));
     }
 
     function normalizePlan(plan) {
-      return { status: 'open', note: '', createdAt: Date.now(), ...plan };
+      const requestStatus = plan.requestStatus || (plan.status === 'closed' ? 'accepted' : 'accepted');
+      return { status: 'open', requestStatus, note: '', declineReason: '', respondedAt: null, createdAt: Date.now(), ...plan, requestStatus };
+    }
+
+    function normalizeCareAssignment(item) {
+      return {
+        date: item.date || dateKey(nowMs()),
+        morningId: PARENT_IDS.includes(item.morningId) ? item.morningId : 'mom',
+        eveningId: PARENT_IDS.includes(item.eveningId) ? item.eveningId : 'dad',
+        updatedAt: item.updatedAt || null
+      };
+    }
+
+    function normalizeCareSession(item) {
+      if (!item?.memberId || !PARENT_IDS.includes(item.memberId)) return null;
+      const minutes = Number(item.minutes || minutesBetween(item.startTime, item.endTime) || 0);
+      return {
+        id: item.id || `care${Date.now()}`,
+        date: item.date || dateKey(item.timestamp || nowMs()),
+        memberId: item.memberId,
+        startTime: item.startTime || '09:00',
+        endTime: item.endTime || '10:00',
+        minutes: Math.max(0, minutes),
+        note: item.note || '',
+        createdAt: item.createdAt || item.timestamp || Date.now()
+      };
     }
 
     function renderHome() {
@@ -1132,9 +1323,12 @@
       const approved = today.filter(x => x.verificationStatus === 'approved');
       const pending = pendingReviews();
       const leader = workRanking(approved)[0];
-      const tomorrow = tomorrowPlansFor(tomorrowDateKey()).filter(p => p.status === 'open');
+      const todayKeyValue = dateKey(nowMs());
+      const todayPlans = plansForDate(todayKeyValue).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
+      const briefing = buildMorningBriefing(todayKeyValue);
       $('section-home').innerHTML = `
         <div class="grid">
+          ${shouldShowMorningBriefing() ? renderBriefingPanel(briefing) : ''}
           <div class="panel span-5">
             <div class="panel-head"><div class="panel-title">오늘 요약</div><span class="tag blue">v${state.version || 0}</span></div>
             <div class="metric-row">
@@ -1152,8 +1346,53 @@
             <div class="list">${today.length ? today.map(renderActivity).join('') : '<div class="empty">오늘 기록이 없어요</div>'}</div>
           </div>
           <div class="panel span-6">
-            <div class="panel-head"><div class="panel-title">내일 할 일</div><span class="tag">${tomorrow.length}</span></div>
-            <div class="list">${tomorrow.length ? tomorrow.map(renderPlan).join('') : '<div class="empty">내일 등록된 일이 없어요</div>'}</div>
+            <div class="panel-head"><div class="panel-title">오늘 해야 할 일</div><span class="tag">${todayPlans.length}</span></div>
+            <div class="list">${todayPlans.length ? todayPlans.map(renderPlan).join('') : '<div class="empty">승인된 오늘 할 일이 없어요</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function shouldShowMorningBriefing() {
+      return new Date(nowMs()).getHours() >= BRIEFING_HOUR;
+    }
+
+    function renderBriefingPanel(summary) {
+      const yesterdayTasks = summary.yesterdayTasks.length
+        ? summary.yesterdayTasks.map(h => `<div class="briefing-item"><strong>${escapeHtml(member(h.memberId)?.name || h.memberId)} · ${escapeHtml(h.choreName)}</strong><div class="mini">${statusMeta(h.verificationStatus).label} · ${approvalSummary(h)}</div></div>`).join('')
+        : '<div class="empty">어제 기록된 일이 없어요</div>';
+      const care = summary.yesterdayCare.length
+        ? summary.yesterdayCare.map(s => `<div class="briefing-item"><strong>${escapeHtml(member(s.memberId)?.name || s.memberId)}</strong><div class="mini">${s.startTime}-${s.endTime} · ${formatMinutes(s.minutes)}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</div></div>`).join('')
+        : '<div class="empty">어제 육아 시간 기록이 없어요</div>';
+      const todayPlans = summary.todayPlans.length
+        ? summary.todayPlans.map(renderPlan).join('')
+        : '<div class="empty">승인된 오늘 할 일이 없어요</div>';
+      const pending = summary.pendingRequests.length
+        ? summary.pendingRequests.map(renderPlan).join('')
+        : '<div class="empty">승인 대기 중인 오늘 할 일 요청이 없어요</div>';
+      return `
+        <div class="panel span-12" data-testid="morning-briefing">
+          <div class="panel-head"><div class="panel-title">아침 7시 브리핑</div><span class="tag blue">${summary.date}</span></div>
+          <div class="grid">
+            <div class="span-6">
+              <div class="mini">어제 한 일</div>
+              <div class="briefing-list">${yesterdayTasks}</div>
+            </div>
+            <div class="span-6">
+              <div class="mini">어제 육아 시간</div>
+              <div class="briefing-list">${care}</div>
+            </div>
+            <div class="span-6">
+              <div class="mini">오늘 담당</div>
+              <div class="briefing-list"><div class="briefing-item">아침 ${escapeHtml(member(summary.assignment.morningId)?.name || '미정')} · 저녁 ${escapeHtml(member(summary.assignment.eveningId)?.name || '미정')}</div></div>
+            </div>
+            <div class="span-6">
+              <div class="mini">오늘 해야 할 일</div>
+              <div class="briefing-list">${todayPlans}</div>
+            </div>
+            <div class="span-12">
+              <div class="mini">승인 대기 요청</div>
+              <div class="briefing-list">${pending}</div>
+            </div>
           </div>
         </div>`;
     }
@@ -1163,7 +1402,9 @@
       if (!selectedMemberId || !canActAs(member(selectedMemberId))) selectedMemberId = allowed?.id || state.members[0]?.id;
       const chores = state.chores.filter(c => selectedCategory === 'all' || c.category === selectedCategory);
       if (!selectedChoreId || !chores.find(c => c.id === selectedChoreId)) selectedChoreId = chores[0]?.id || null;
-      const reviewers = reviewableMembers(selectedMemberId);
+      const selectedChore = chore(selectedChoreId);
+      const reviewers = requiredReviewersFor(selectedMemberId, selectedChore?.category);
+      const reviewerText = reviewers.length ? reviewers.map(id => member(id)?.name || id).join(', ') : '자동 승인';
       $('section-tasks').innerHTML = `
         <div class="grid">
           <div class="panel span-12">
@@ -1177,10 +1418,7 @@
           </div>
           <div class="panel span-5">
             <div class="panel-head"><div class="panel-title">증빙과 확인 요청</div></div>
-            <div class="field">
-              <label for="reviewerId">확인할 사람</label>
-              <select id="reviewerId">${reviewers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select>
-            </div>
+            <div class="briefing-item" data-testid="auto-reviewers"><strong>자동 확인자</strong><div class="mini">${escapeHtml(reviewerText)}</div></div>
             <div class="field">
               <label for="proofPhoto">사진</label>
               <input id="proofPhoto" data-testid="proof-photo" type="file" accept="image/*" capture="environment" onchange="handleProofSelected(event)">
@@ -1201,7 +1439,7 @@
     function renderBadges() {
       const pending = pendingReviews();
       const mine = state.history
-        .filter(h => session?.isAdmin || h.reviewerId === currentMemberId())
+        .filter(h => session?.isAdmin || h.approvalRequests?.some(r => r.reviewerId === currentMemberId()))
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 30);
       $('section-badges').innerHTML = `
@@ -1218,20 +1456,71 @@
     }
 
     function renderCalendar() {
-      const targetDate = tomorrowDateKey();
-      const plans = tomorrowPlansFor(targetDate);
+      const targetDate = selectedDate || dateKey(nowMs());
+      const plans = plansForDate(targetDate);
+      const acceptedPlans = plans.filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
+      const pendingPlans = plans.filter(p => p.requestStatus === 'pending');
+      const declinedPlans = plans.filter(p => p.requestStatus === 'declined');
+      const assignment = careAssignmentFor(targetDate);
+      const sessions = careSessionsFor(targetDate);
+      const minutesByMember = careMinutesByMember(targetDate);
+      const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+      const start = new Date(first);
+      const weekStart = Number(state.settings.weekStartsOn || 0);
+      start.setDate(1 - ((first.getDay() - weekStart + 7) % 7));
+      const days = Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        return d;
+      });
+      const weekLabels = weekStart === 1 ? ['월', '화', '수', '목', '금', '토', '일'] : ['일', '월', '화', '수', '목', '금', '토'];
       $('section-calendar').innerHTML = `
         <div class="grid">
+          <div class="panel span-7">
+            <div class="calendar-head">
+              <button class="btn icon" onclick="moveMonth(-1)">‹</button>
+              <div><strong>${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}</strong><div class="mini">${targetDate}</div></div>
+              <button class="btn icon" onclick="moveMonth(1)">›</button>
+            </div>
+            <div class="calendar-grid">${weekLabels.map(x => `<div class="weekday">${x}</div>`).join('')}${days.map(d => renderDay(d, calendarMonth.getMonth())).join('')}</div>
+          </div>
           <div class="panel span-5">
-            <div class="panel-head"><div class="panel-title">내일 알려줄 일</div><span class="tag blue">${targetDate}</span></div>
-            <div class="field"><label for="planTo">담당</label><select id="planTo">${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+            <div class="panel-head"><div class="panel-title">할 일 요청</div><span class="tag blue">${targetDate}</span></div>
+            <div class="field"><label for="planDate">날짜</label><input id="planDate" data-testid="plan-date" type="date" value="${targetDate}"></div>
+            <div class="field"><label for="planTo">받는 사람</label><select id="planTo">${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
             <div class="field"><label for="planChore">할 일</label><select id="planChore">${state.chores.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
             <div class="field"><label for="planNote">메모</label><textarea id="planNote" data-testid="tomorrow-note" placeholder="예: 오전에 먼저 해주면 좋아"></textarea></div>
-            <button class="btn primary full" data-testid="add-tomorrow-plan" onclick="addTomorrowPlan()">내일 할 일 등록</button>
+            <button class="btn primary full" data-testid="add-tomorrow-plan" onclick="addTomorrowPlan()">할 일 요청 보내기</button>
           </div>
-          <div class="panel span-7">
-            <div class="panel-head"><div class="panel-title">내일 목록</div><span class="tag">${plans.length}</span></div>
-            <div class="list">${plans.length ? plans.map(renderPlan).join('') : '<div class="empty">등록된 내일 할 일이 없어요</div>'}</div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">육아 담당</div><span class="tag">${targetDate}</span></div>
+            <div class="form-grid">
+              <div class="field col-6"><label for="careMorning">아침</label><select id="careMorning" data-testid="care-morning" ${canEditCare() ? '' : 'disabled'}>${parentOptions(assignment.morningId)}</select></div>
+              <div class="field col-6"><label for="careEvening">저녁</label><select id="careEvening" data-testid="care-evening" ${canEditCare() ? '' : 'disabled'}>${parentOptions(assignment.eveningId)}</select></div>
+              <button class="btn primary col-12" data-testid="save-care-assignment" ${canEditCare() ? '' : 'disabled'} onclick="saveCareAssignment()">담당 저장</button>
+            </div>
+            <div class="briefing-list">
+              ${parentMembers().map(m => `<div class="briefing-item"><strong>${escapeHtml(m.name)}</strong><div class="mini">${formatMinutes(minutesByMember[m.id] || 0)}</div></div>`).join('')}
+            </div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">아이 본 시간</div><span class="time-total">${formatMinutes(careMinutesFor(targetDate))}</span></div>
+            <div class="form-grid">
+              <div class="field col-4"><label for="careMember">담당</label><select id="careMember" data-testid="care-member" ${canEditCare() ? '' : 'disabled'}>${parentOptions(currentMemberId() && PARENT_IDS.includes(currentMemberId()) ? currentMemberId() : assignment.morningId)}</select></div>
+              <div class="field col-4"><label for="careStart">시작</label><input id="careStart" data-testid="care-start" type="time" value="09:00" ${canEditCare() ? '' : 'disabled'}></div>
+              <div class="field col-4"><label for="careEnd">종료</label><input id="careEnd" data-testid="care-end" type="time" value="10:00" ${canEditCare() ? '' : 'disabled'}></div>
+              <div class="field col-12"><label for="careNote">메모</label><input id="careNote" data-testid="care-note" placeholder="예: 등원 준비와 아침 식사" ${canEditCare() ? '' : 'disabled'}></div>
+              <button class="btn primary col-12" data-testid="add-care-session" ${canEditCare() ? '' : 'disabled'} onclick="addCareSession()">육아 시간 추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${sessions.length ? sessions.map(renderCareSession).join('') : '<div class="empty">기록된 육아 시간이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">선택한 날짜의 할 일</div><span class="tag">${plans.length}</span></div>
+            <div class="grid">
+              <div class="span-4"><div class="mini">승인 대기</div><div class="list">${pendingPlans.length ? pendingPlans.map(renderPlan).join('') : '<div class="empty">대기 요청 없음</div>'}</div></div>
+              <div class="span-4"><div class="mini">오늘 할 일</div><div class="list">${acceptedPlans.length ? acceptedPlans.map(renderPlan).join('') : '<div class="empty">승인된 할 일 없음</div>'}</div></div>
+              <div class="span-4"><div class="mini">거절됨</div><div class="list">${declinedPlans.length ? declinedPlans.map(renderPlan).join('') : '<div class="empty">거절된 요청 없음</div>'}</div></div>
+            </div>
           </div>
         </div>`;
     }
@@ -1291,10 +1580,9 @@
     function renderActivity(entry) {
       const m = member(entry.memberId);
       const c = chore(entry.choreId);
-      const reviewer = member(entry.reviewerId);
       const status = statusMeta(entry.verificationStatus);
       const proof = entry.proofImage ? `<img class="photo-cell" src="${entry.proofImage}" alt="증빙 사진">` : `<div class="photo-cell" style="display:grid;place-items:center;color:var(--muted);font-size:12px;">사진 없음</div>`;
-      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 확인자 ${escapeHtml(reviewer?.name || '미지정')} · 부담 ${entry.fatigueAdded || 0}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">검토 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
+      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 부담 ${entry.fatigueAdded || 0}</div><div class="approval-list">${approvalBadges(entry)}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">검토 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
     }
 
     function renderReviewItem(entry) {
@@ -1307,7 +1595,16 @@
       const from = member(plan.fromId);
       const c = chore(plan.choreId);
       const closed = plan.status !== 'open';
-      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(to?.name || '담당 미정')} · ${escapeHtml(plan.title || c?.name || '할 일')}</strong><span class="tag ${closed ? 'teal' : 'blue'}">${closed ? '닫힘' : '예정'}</span></div><div class="mini">${plan.targetDate} · 등록 ${escapeHtml(from?.name || '관리자')}</div>${plan.note ? `<div class="mini">${escapeHtml(plan.note)}</div>` : ''}${!closed ? `<div style="margin-top:8px;"><button class="btn" onclick="closeTomorrowPlan('${plan.id}')">닫기</button></div>` : ''}</div>`;
+      const meta = requestMeta(plan.requestStatus);
+      const actions = plan.requestStatus === 'pending' && canRespondPlan(plan)
+        ? `<div class="review-actions"><button class="btn primary" data-testid="accept-plan" onclick="acceptPlan('${plan.id}')">승인</button><button class="btn danger" data-testid="decline-plan" onclick="declinePlan('${plan.id}')">거절</button></div>`
+        : (plan.requestStatus === 'accepted' && !closed ? `<div class="review-actions"><button class="btn" onclick="closeTomorrowPlan('${plan.id}')">완료 처리</button></div>` : '');
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(to?.name || '담당 미정')} · ${escapeHtml(plan.title || c?.name || '할 일')}</strong><span class="tag ${meta.className}">${closed ? '닫힘' : meta.label}</span></div><div class="mini">${plan.targetDate} · 요청 ${escapeHtml(from?.name || '관리자')} → ${escapeHtml(to?.name || '미정')}</div>${plan.note ? `<div class="mini">${escapeHtml(plan.note)}</div>` : ''}${plan.declineReason ? `<div class="mini">거절 이유: ${escapeHtml(plan.declineReason)}</div>` : ''}${actions}</div>`;
+    }
+
+    function renderCareSession(item) {
+      const m = member(item.memberId);
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(m?.name || item.memberId)} · ${formatMinutes(item.minutes)}</strong><span class="tag teal">${item.startTime}-${item.endTime}</span></div>${item.note ? `<div class="mini">${escapeHtml(item.note)}</div>` : ''}</div>`;
     }
 
     function renderMemberSetting(m) {
@@ -1322,6 +1619,22 @@
       const m = member(acc.memberId);
       const label = acc.isAdmin ? '관리자' : `${m?.emoji || ''} ${m?.name || '연결 없음'}`;
       return `<div class="account-row"><span class="tag blue">${escapeHtml(acc.id)}</span><div class="grow">${escapeHtml(label)}<div class="mini">${acc.password.replace(/./g, '*')}</div></div><button class="btn icon danger" onclick="removeAccount('${acc.id}')">X</button></div>`;
+    }
+
+    function approvalBadges(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '<span class="tag teal">승인 불필요</span>';
+      return requests.map(r => {
+        const meta = statusMeta(r.status);
+        const reviewer = member(r.reviewerId);
+        return `<span class="tag ${meta.className}">${escapeHtml(reviewer?.name || r.reviewerId)} ${meta.label}</span>`;
+      }).join('');
+    }
+
+    function approvalSummary(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '승인 불필요';
+      return requests.map(r => `${member(r.reviewerId)?.name || r.reviewerId} ${statusMeta(r.status).label}`).join(', ');
     }
 
     async function handleProofSelected(event) {
@@ -1382,7 +1695,7 @@
       const c = chore(selectedChoreId);
       if (!m || !c || !canActAs(m)) return;
       if (currentProofPromise) await currentProofPromise;
-      const reviewerId = $('reviewerId')?.value || reviewableMembers(m.id)[0]?.id || null;
+      const reviewers = requiredReviewersFor(m.id, c.category);
       const caption = $('proofCaption')?.value.trim() || '';
       const entry = {
         id: `h${Date.now()}`,
@@ -1395,45 +1708,54 @@
         xpEarned: Number(c.xp),
         timestamp: Date.now(),
         verificationStatus: 'pending',
-        reviewerId,
+        reviewerId: reviewers[0] || null,
         reviewedBy: null,
         reviewedAt: null,
         reviewNote: '',
+        approvalRequests: reviewers.map(reviewerId => ({ reviewerId, status: 'pending', reviewedAt: null, reviewNote: '' })),
         proofImage: currentProof?.dataUrl || '',
         proofImageName: currentProof?.name || '',
         proofCaption: caption,
         proofAnalysis: currentProof?.analysis || (caption ? '메모만 등록됨' : '사진/메모 없음')
       };
+      syncEntryReviewStatus(entry);
       state.history.push(entry);
       applyMemberTotals();
-      state.messages.push({ id: `msg${Date.now()}`, fromId: m.id, toId: reviewerId, text: `${m.name}님이 ${c.name} 완료 확인을 요청했습니다.`, timestamp: Date.now() });
-      await saveState(false);
+      reviewers.forEach((reviewerId, index) => {
+        state.messages.push({ id: `msg${Date.now()}${index}`, fromId: m.id, toId: reviewerId, text: `${m.name}님이 ${c.name} 완료 확인을 요청했습니다.`, timestamp: Date.now() });
+      });
       showSuccess('기록', '확인 요청을 보냈습니다', `${c.name} 기록이 확인 대기로 저장되었습니다.`);
+      await saveStateOptimistic('확인 요청을 저장했습니다');
     }
 
     async function approveTask(id) {
       const entry = state.history.find(h => h.id === id);
       if (!entry || !canReviewEntry(entry)) return;
-      entry.verificationStatus = 'approved';
-      entry.reviewedBy = currentMemberId() || 'admin';
-      entry.reviewedAt = Date.now();
-      entry.reviewNote = prompt('확인 메모', '확인했습니다') || '확인했습니다';
-      grantBadges(member(entry.memberId));
+      const note = prompt('확인 메모', '확인했습니다') || '확인했습니다';
+      reviewTargetsFor(entry).forEach(req => {
+        req.status = 'approved';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncEntryReviewStatus(entry);
+      if (entry.verificationStatus === 'approved') grantBadges(member(entry.memberId));
       applyMemberTotals();
-      await saveState(false);
-      toast('확인 완료');
+      await saveStateOptimistic('확인 완료');
     }
 
     async function rejectTask(id) {
       const entry = state.history.find(h => h.id === id);
       if (!entry || !canReviewEntry(entry)) return;
-      entry.verificationStatus = 'rejected';
-      entry.reviewedBy = currentMemberId() || 'admin';
-      entry.reviewedAt = Date.now();
-      entry.reviewNote = prompt('다시 확인할 내용', '사진이나 설명을 더 남겨주세요') || '다시 확인이 필요합니다';
+      const note = promptRequired('다시 확인할 내용', '사진이나 설명을 더 남겨주세요');
+      if (!note) return;
+      reviewTargetsFor(entry).forEach(req => {
+        req.status = 'rejected';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncEntryReviewStatus(entry);
       applyMemberTotals();
-      await saveState(false);
-      toast('다시 확인 요청됨');
+      await saveStateOptimistic('다시 확인 요청됨');
     }
 
     async function addTomorrowPlan() {
@@ -1441,9 +1763,45 @@
       const choreId = $('planChore')?.value;
       const c = chore(choreId);
       if (!toId || !c) return;
-      state.tomorrowPlans.push({ id: `p${Date.now()}`, fromId: currentMemberId() || 'admin', toId, choreId, title: c.name, note: $('planNote')?.value.trim() || '', targetDate: tomorrowDateKey(), status: 'open', createdAt: Date.now() });
-      await saveState(false);
-      toast('내일 할 일을 등록했습니다');
+      const targetDate = $('planDate')?.value || selectedDate || dateKey(nowMs());
+      state.tomorrowPlans.push({
+        id: `p${Date.now()}`,
+        fromId: currentMemberId() || 'admin',
+        toId,
+        choreId,
+        title: c.name,
+        note: $('planNote')?.value.trim() || '',
+        targetDate,
+        status: 'open',
+        requestStatus: 'pending',
+        declineReason: '',
+        respondedAt: null,
+        createdAt: Date.now()
+      });
+      state.messages.push({ id: `msg${Date.now()}`, fromId: currentMemberId() || 'admin', toId, text: `${c.name} 할 일 요청이 도착했습니다. 승인하면 ${targetDate} 할 일에 포함됩니다.`, timestamp: Date.now() });
+      await saveStateOptimistic('할 일 요청을 보냈습니다');
+    }
+
+    async function acceptPlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan || !canRespondPlan(plan)) return;
+      plan.requestStatus = 'accepted';
+      plan.status = 'open';
+      plan.respondedAt = Date.now();
+      plan.declineReason = '';
+      await saveStateOptimistic('오늘 할 일에 포함했습니다');
+    }
+
+    async function declinePlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan || !canRespondPlan(plan)) return;
+      const reason = promptRequired('할 수 없는 이유', '오늘은 시간이 맞지 않습니다');
+      if (!reason) return;
+      plan.requestStatus = 'declined';
+      plan.status = 'closed';
+      plan.respondedAt = Date.now();
+      plan.declineReason = reason;
+      await saveStateOptimistic('거절 이유를 저장했습니다');
     }
 
     async function closeTomorrowPlan(id) {
@@ -1451,8 +1809,44 @@
       if (!plan) return;
       plan.status = 'closed';
       plan.closedAt = Date.now();
-      await saveState(false);
-      toast('내일 목록에서 닫았습니다');
+      await saveStateOptimistic('할 일을 완료 처리했습니다');
+    }
+
+    async function saveCareAssignment() {
+      if (!canEditCare()) return;
+      const date = selectedDate || dateKey(nowMs());
+      const existing = state.careAssignments.find(a => a.date === date);
+      const next = {
+        date,
+        morningId: $('careMorning')?.value || 'mom',
+        eveningId: $('careEvening')?.value || 'dad',
+        updatedAt: Date.now()
+      };
+      if (existing) Object.assign(existing, next);
+      else state.careAssignments.push(next);
+      await saveStateOptimistic('육아 담당을 저장했습니다');
+    }
+
+    async function addCareSession() {
+      if (!canEditCare()) return;
+      const date = selectedDate || dateKey(nowMs());
+      const memberId = $('careMember')?.value;
+      const startTime = $('careStart')?.value;
+      const endTime = $('careEnd')?.value;
+      const minutes = minutesBetween(startTime, endTime);
+      if (!memberId || !PARENT_IDS.includes(memberId)) return toast('엄마 또는 아빠를 선택해 주세요');
+      if (!startTime || !endTime || minutes <= 0) return toast('시작/종료 시간을 확인해 주세요');
+      state.careSessions.push({
+        id: `care${Date.now()}`,
+        date,
+        memberId,
+        startTime,
+        endTime,
+        minutes,
+        note: $('careNote')?.value.trim() || '',
+        createdAt: Date.now()
+      });
+      await saveStateOptimistic('육아 시간을 저장했습니다');
     }
 
     function applyMemberTotals() {
@@ -1481,9 +1875,24 @@
     }
 
     function buildDailySummary() {
-      const tasks = todayHistory().map(h => ({ memberName: member(h.memberId)?.name || h.memberId, choreName: h.choreName, status: statusMeta(h.verificationStatus).label, reviewer: member(h.reviewerId)?.name || '', time: formatClock(h.timestamp) }));
-      const tomorrow = tomorrowPlansFor(tomorrowDateKey()).map(p => ({ to: member(p.toId)?.name || p.toId, title: p.title, note: p.note }));
-      return { date: dateKey(Date.now()), tasks, tomorrow };
+      const todayKeyValue = dateKey(nowMs());
+      const tasks = todayHistory().map(h => ({ memberName: member(h.memberId)?.name || h.memberId, choreName: h.choreName, status: statusMeta(h.verificationStatus).label, approvals: approvalSummary(h), time: formatClock(h.timestamp) }));
+      const plans = plansForDate(todayKeyValue).map(p => ({ to: member(p.toId)?.name || p.toId, title: p.title, note: p.note, requestStatus: p.requestStatus, declineReason: p.declineReason || '' }));
+      const care = careSessionsFor(todayKeyValue).map(s => ({ memberName: member(s.memberId)?.name || s.memberId, startTime: s.startTime, endTime: s.endTime, minutes: s.minutes, note: s.note }));
+      return { date: todayKeyValue, tasks, plans, care, briefing: buildMorningBriefing(todayKeyValue) };
+    }
+
+    function buildMorningBriefing(key = dateKey(nowMs())) {
+      const yesterday = addDaysKey(key, -1);
+      return {
+        date: key,
+        yesterday,
+        yesterdayTasks: entriesByDate(yesterday),
+        yesterdayCare: careSessionsFor(yesterday),
+        assignment: careAssignmentFor(key),
+        todayPlans: plansForDate(key).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed'),
+        pendingRequests: plansForDate(key).filter(p => p.requestStatus === 'pending')
+      };
     }
 
     function updateVacationFlags(target) {
@@ -1495,12 +1904,12 @@
     }
 
     function currentMemberId() { return session?.memberId || null; }
-    function canReviewEntry(entry) { return !!session && (session.isAdmin || (entry.reviewerId === session.memberId && entry.memberId !== session.memberId)); }
+    function canReviewEntry(entry) { return !!session && reviewTargetsFor(entry).length > 0; }
     function reviewableMembers(memberId) { return state.members.filter(m => m.id !== memberId); }
-    function pendingReviews() { return state.history.filter(h => h.verificationStatus === 'pending' && (!session || session.isAdmin || h.reviewerId === session.memberId)).sort((a, b) => b.timestamp - a.timestamp); }
-    function todayHistory() { const key = dateKey(Date.now()); return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => b.timestamp - a.timestamp); }
-    function tomorrowDateKey() { const d = new Date(); d.setDate(d.getDate() + 1); return dateKey(d.getTime()); }
-    function tomorrowPlansFor(key) { return state.tomorrowPlans.filter(p => p.targetDate === key).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)); }
+    function pendingReviews() { return state.history.filter(h => h.verificationStatus === 'pending' && (!session || canReviewEntry(h))).sort((a, b) => b.timestamp - a.timestamp); }
+    function todayHistory() { const key = dateKey(nowMs()); return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => b.timestamp - a.timestamp); }
+    function tomorrowDateKey() { return addDaysKey(dateKey(nowMs()), 1); }
+    function tomorrowPlansFor(key) { return plansForDate(key); }
     function statusMeta(status) { return REVIEW_STATUS[status] || REVIEW_STATUS.pending; }
     function workRanking(items) {
       const map = new Map();

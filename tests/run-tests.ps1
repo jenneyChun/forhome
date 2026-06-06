@@ -30,11 +30,16 @@ Write-Host "ForHome Firebase hosting, Firestore, and backup structure tests"
     "firebase.json",
     "firestore.rules",
     ".github\workflows\firestore-backup.yml",
+    ".github\workflows\codex-kakao-notify.yml",
     "scripts\firestore-backup.js",
     "server\server.ps1",
     "server\send_kakao.ps1",
+    "server\send_codex_update.ps1",
     "server\setup_scheduler.ps1",
     "server\start_server.bat",
+    "server\kakao-recipients.example.json",
+    "server\briefing.env.example.ps1",
+    "docs\codex-kakao-notify.ko.md",
     "tests\playwright.config.js",
     "tests\e2e\app.spec.js",
     "tests\fixtures\backup-state.json",
@@ -45,7 +50,7 @@ Write-Host "ForHome Firebase hosting, Firestore, and backup structure tests"
 $docs = @(Get-ChildItem -Path (Join-Path $repoRoot "docs") -Filter "*.md" -File)
 Assert-True ($docs.Count -gt 0) "requirements document exists in docs"
 
-@("server\server.ps1", "server\send_kakao.ps1", "server\setup_scheduler.ps1") | ForEach-Object {
+@("server\server.ps1", "server\send_kakao.ps1", "server\send_codex_update.ps1", "server\setup_scheduler.ps1") | ForEach-Object {
     $path = Join-Path $repoRoot $_
     try {
         [scriptblock]::Create((Get-Content -Raw -Encoding UTF8 $path)) | Out-Null
@@ -60,7 +65,11 @@ $serverText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\serve
 $indexText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "code\index.html")
 $rulesText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "firestore.rules")
 $workflowText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot ".github\workflows\firestore-backup.yml")
+$codexWorkflowText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot ".github\workflows\codex-kakao-notify.yml")
 $backupScriptText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "scripts\firestore-backup.js")
+$sendKakaoText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\send_kakao.ps1")
+$sendCodexText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\send_codex_update.ps1")
+$schedulerText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\setup_scheduler.ps1")
 
 Assert-True ($serverText -notmatch "app_state\.json") "server does not use app_state.json"
 Assert-True ($serverText -notmatch "Initialize-Database") "static test server does not initialize PostgreSQL"
@@ -72,11 +81,25 @@ Assert-True ($indexText -match "LOCAL_HOSTS") "client defaults localhost to loca
 Assert-True ($indexText -notmatch "/api/state") "client does not use local state API"
 Assert-True ($indexText -match "proofPhoto") "client supports photo proof input"
 Assert-True ($indexText -match "verificationStatus") "client tracks task verification status"
+Assert-True ($indexText -match "approvalRequests") "client tracks multi-parent approval requests"
+Assert-True ($indexText -match "careAssignments") "client tracks morning and evening care assignments"
+Assert-True ($indexText -match "careSessions") "client tracks child care time sessions"
+Assert-True ($indexText -match "morning-briefing") "client renders morning briefing"
+Assert-True ($indexText -match "requestStatus") "client tracks task request approval status"
 Assert-True ($indexText -match "approveTask") "client supports reviewer approval"
 Assert-True ($indexText -match "tomorrowPlans") "client tracks tomorrow plans"
 Assert-True ($rulesText -match "admin@forhome\.local") "Firestore rules allow seeded admin auth email"
 Assert-True ($workflowText -match "10 15 \* \* \*") "GitHub Actions backup runs daily at KST midnight window"
+Assert-True ($codexWorkflowText -match "send_codex_update\.ps1") "GitHub Actions sends Codex Kakao notification"
+Assert-True ($codexWorkflowText -match "KAKAO_RECIPIENTS_JSON") "Codex Kakao workflow reads recipient secret"
 Assert-True ($backupScriptText -match "FIREBASE_SERVICE_ACCOUNT_JSON") "backup script reads Firebase service account secret"
+Assert-True ($backupScriptText -match "morningBriefing") "backup script builds morning briefing"
+Assert-True ($sendKakaoText -notmatch "Initialize-Database") "Kakao briefing does not initialize PostgreSQL"
+Assert-True ($sendKakaoText -notmatch "db\.ps1") "Kakao briefing does not import PostgreSQL helpers"
+Assert-True ($sendKakaoText -match "firestore-backup\.js") "Kakao briefing uses Firestore backup script"
+Assert-True ($sendCodexText -match "Codex follow-up commands") "Codex Kakao notification includes follow-up commands"
+Assert-True ($sendCodexText -match "/commit/") "Codex Kakao notification builds GitHub commit URL"
+Assert-True ($schedulerText -match '\$sendTime = "07:00"') "scheduler sends briefing at 07:00"
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if ($node) {
@@ -84,6 +107,8 @@ if ($node) {
     & node (Join-Path $repoRoot "scripts\firestore-backup.js") --fixture (Join-Path $repoRoot "tests\fixtures\backup-state.json") --date "2026-06-03" --out-dir $dryRunDir
     Assert-True (Test-Path (Join-Path $dryRunDir "data\backups\2026-06-03\state.json")) "backup dry run writes dated state JSON"
     Assert-True (Test-Path (Join-Path $dryRunDir "reports\daily\2026-06-03.md")) "backup dry run writes dated markdown report"
+    & node (Join-Path $repoRoot "scripts\firestore-backup.js") --fixture (Join-Path $repoRoot "tests\fixtures\backup-state.json") --date "2026-06-04" --briefing --out-file (Join-Path $dryRunDir "morning_briefing.json")
+    Assert-True (Test-Path (Join-Path $dryRunDir "morning_briefing.json")) "briefing dry run writes morning briefing JSON"
 } else {
     Write-Host "SKIP backup dry run because node is not available."
 }

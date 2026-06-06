@@ -12,6 +12,11 @@
       "emoji": "M"
     },
     {
+      "id": "dad",
+      "name": "Dad",
+      "emoji": "D"
+    },
+    {
       "id": "son",
       "name": "Son",
       "emoji": "S"
@@ -44,6 +49,14 @@
       "reviewedBy": "son",
       "reviewedAt": 1780417800000,
       "reviewNote": "Looks done",
+      "approvalRequests": [
+        {
+          "reviewerId": "dad",
+          "status": "approved",
+          "reviewedAt": 1780417800000,
+          "reviewNote": "Looks done"
+        }
+      ],
       "proofImage": "",
       "proofCaption": "Sink is clear",
       "proofAnalysis": "memo only"
@@ -68,7 +81,30 @@
       "note": "Please do it after dinner",
       "targetDate": "2026-06-04",
       "status": "open",
+      "requestStatus": "accepted",
+      "declineReason": "",
+      "respondedAt": 1780420000000,
       "createdAt": 1780419900000
+    }
+  ],
+  "careAssignments": [
+    {
+      "date": "2026-06-04",
+      "morningId": "mom",
+      "eveningId": "dad",
+      "updatedAt": 1780419900000
+    }
+  ],
+  "careSessions": [
+    {
+      "id": "care1",
+      "date": "2026-06-03",
+      "memberId": "mom",
+      "startTime": "07:30",
+      "endTime": "09:00",
+      "minutes": 90,
+      "note": "Breakfast and school prep",
+      "createdAt": 1780416000000
     }
   ],
   "badgeHistory": []

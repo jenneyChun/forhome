@@ -32,8 +32,43 @@ function dateKey(ts) {
   return d.toISOString().slice(0, 10);
 }
 
+function addDaysKey(date, days) {
+  const d = new Date(`${date}T00:00:00.000+09:00`);
+  d.setDate(d.getDate() + days);
+  return dateKey(d.getTime());
+}
+
 function formatClock(ts) {
   return new Date(Number(ts)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' });
+}
+
+function formatMinutes(minutes) {
+  const value = Math.max(0, Number(minutes || 0));
+  const h = Math.floor(value / 60);
+  const m = value % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
+function statusLabel(status) {
+  return ({ pending: 'pending', approved: 'approved', rejected: 'rejected' })[status] || status || 'pending';
+}
+
+function requestLabel(status) {
+  return ({ pending: 'pending approval', accepted: 'today task', declined: 'declined' })[status] || status || 'pending approval';
+}
+
+function approvalText(task, members) {
+  const requests = Array.isArray(task.approvalRequests) ? task.approvalRequests : [];
+  if (!requests.length) {
+    const reviewer = members.get(task.reviewerId);
+    return reviewer ? `${reviewer.name}: ${statusLabel(task.verificationStatus)}` : 'no approval requests';
+  }
+  return requests.map((request) => {
+    const reviewer = members.get(request.reviewerId);
+    return `${reviewer?.name || request.reviewerId}: ${statusLabel(request.status)}`;
+  }).join(', ');
 }
 
 function dailySummary(state, date) {
@@ -53,6 +88,7 @@ function dailySummary(state, date) {
         choreName: h.choreName || chore?.name || h.choreId,
         status: h.verificationStatus || 'approved',
         reviewerName: reviewer?.name || '',
+        approvals: approvalText(h, members),
         proof: h.proofImage ? 'photo' : (h.proofCaption ? 'memo' : 'none'),
         xp: Number(h.xpEarned || 0),
         time: formatClock(h.timestamp)
@@ -70,6 +106,32 @@ function dailySummary(state, date) {
         time: formatClock(m.timestamp)
       };
     });
+  const careAssignments = (state.careAssignments || []).find((item) => item.date === date) || null;
+  const careSessions = (state.careSessions || [])
+    .filter((session) => session.date === date)
+    .map((session) => ({
+      memberName: members.get(session.memberId)?.name || session.memberId,
+      startTime: session.startTime || '',
+      endTime: session.endTime || '',
+      minutes: Number(session.minutes || 0),
+      note: session.note || ''
+    }));
+  const todayPlans = (state.tomorrowPlans || [])
+    .filter((plan) => plan.targetDate === date)
+    .map((plan) => {
+      const to = members.get(plan.toId);
+      const from = members.get(plan.fromId);
+      const chore = chores.get(plan.choreId);
+      return {
+        from: from?.name || plan.fromId || 'admin',
+        to: to?.name || plan.toId,
+        title: plan.title || chore?.name || plan.choreId,
+        note: plan.note || '',
+        requestStatus: plan.requestStatus || 'accepted',
+        declineReason: plan.declineReason || '',
+        status: plan.status || 'open'
+      };
+    });
   const tomorrowPlans = (state.tomorrowPlans || [])
     .filter((plan) => plan.targetDate === tomorrowKey && plan.status !== 'closed')
     .map((plan) => {
@@ -81,7 +143,7 @@ function dailySummary(state, date) {
         note: plan.note || ''
       };
     });
-  return { date, tasks, messages, tomorrowPlans };
+  return { date, tasks, messages, careAssignments, careSessions, todayPlans, tomorrowPlans };
 }
 
 function markdownReport(state, summary) {
@@ -92,6 +154,8 @@ function markdownReport(state, summary) {
     `- Updated at: ${state.updatedAt || 'unknown'}`,
     `- Tasks today: ${summary.tasks.length}`,
     `- Messages today: ${summary.messages.length}`,
+    `- Care sessions today: ${summary.careSessions.length}`,
+    `- Today task requests: ${summary.todayPlans.length}`,
     `- Tomorrow plans: ${summary.tomorrowPlans.length}`,
     '',
     '## Tasks',
@@ -101,10 +165,35 @@ function markdownReport(state, summary) {
   if (summary.tasks.length) {
     summary.tasks.forEach((task) => {
       const reviewer = task.reviewerName ? `, reviewer: ${task.reviewerName}` : '';
-      lines.push(`- ${task.time} ${task.memberName}: ${task.choreName} (${task.status}, ${task.proof}${reviewer}, +${task.xp} XP)`);
+      lines.push(`- ${task.time} ${task.memberName}: ${task.choreName} (${task.status}, ${task.proof}${reviewer}, approvals: ${task.approvals}, +${task.xp} XP)`);
     });
   } else {
     lines.push('- No tasks recorded.');
+  }
+
+  lines.push('', '## Care', '');
+  if (summary.careAssignments) {
+    lines.push(`- Morning: ${summary.careAssignments.morningId || 'unassigned'}`);
+    lines.push(`- Evening: ${summary.careAssignments.eveningId || 'unassigned'}`);
+  } else {
+    lines.push('- No care assignment recorded.');
+  }
+  if (summary.careSessions.length) {
+    summary.careSessions.forEach((session) => {
+      lines.push(`- ${session.memberName}: ${session.startTime}-${session.endTime} (${formatMinutes(session.minutes)})${session.note ? ` - ${session.note}` : ''}`);
+    });
+  } else {
+    lines.push('- No care sessions recorded.');
+  }
+
+  lines.push('', '## Today Requests', '');
+  if (summary.todayPlans.length) {
+    summary.todayPlans.forEach((plan) => {
+      const decline = plan.declineReason ? `, reason: ${plan.declineReason}` : '';
+      lines.push(`- ${plan.from} -> ${plan.to}: ${plan.title} (${requestLabel(plan.requestStatus)}${decline})`);
+    });
+  } else {
+    lines.push('- No task requests for today.');
   }
 
   lines.push('', '## Messages', '');
@@ -128,6 +217,64 @@ function markdownReport(state, summary) {
 
   lines.push('');
   return lines.join('\n');
+}
+
+function morningBriefing(state, date) {
+  const members = new Map((state.members || []).map((m) => [m.id, m]));
+  const yesterday = addDaysKey(date, -1);
+  const yesterdaySummary = dailySummary(state, yesterday);
+  const todaySummary = dailySummary(state, date);
+  const assignment = todaySummary.careAssignments || {};
+  const accepted = todaySummary.todayPlans.filter((plan) => plan.requestStatus === 'accepted' && plan.status !== 'closed');
+  const pending = todaySummary.todayPlans.filter((plan) => plan.requestStatus === 'pending');
+  const lines = [
+    `ForHome morning briefing - ${date}`,
+    '',
+    `Yesterday tasks: ${yesterdaySummary.tasks.length}`
+  ];
+
+  if (yesterdaySummary.tasks.length) {
+    yesterdaySummary.tasks.slice(0, 8).forEach((task) => {
+      lines.push(`- ${task.memberName}: ${task.choreName} (${task.status}, ${task.approvals})`);
+    });
+  } else {
+    lines.push('- No tasks recorded yesterday.');
+  }
+
+  lines.push('', `Yesterday care: ${yesterdaySummary.careSessions.length}`);
+  if (yesterdaySummary.careSessions.length) {
+    yesterdaySummary.careSessions.forEach((session) => {
+      lines.push(`- ${session.memberName}: ${session.startTime}-${session.endTime} (${formatMinutes(session.minutes)})`);
+    });
+  } else {
+    lines.push('- No care time recorded yesterday.');
+  }
+
+  lines.push('', 'Today care assignment');
+  lines.push(`- Morning: ${members.get(assignment.morningId)?.name || assignment.morningId || 'unassigned'}`);
+  lines.push(`- Evening: ${members.get(assignment.eveningId)?.name || assignment.eveningId || 'unassigned'}`);
+
+  lines.push('', `Today tasks: ${accepted.length}`);
+  if (accepted.length) {
+    accepted.forEach((plan) => lines.push(`- ${plan.to}: ${plan.title}${plan.note ? ` - ${plan.note}` : ''}`));
+  } else {
+    lines.push('- No accepted tasks for today.');
+  }
+
+  lines.push('', `Pending requests: ${pending.length}`);
+  if (pending.length) {
+    pending.forEach((plan) => lines.push(`- ${plan.from} -> ${plan.to}: ${plan.title}`));
+  } else {
+    lines.push('- No pending task requests.');
+  }
+
+  const text = lines.join('\n');
+  return {
+    date,
+    yesterday,
+    text: text.length > 1800 ? `${text.slice(0, 1797)}...` : text,
+    summary: { yesterday: yesterdaySummary, today: todaySummary }
+  };
 }
 
 async function loadFirestoreState(projectId, familyId) {
@@ -162,6 +309,20 @@ async function main() {
   const state = args.fixture
     ? readJsonFile(path.resolve(args.fixture))
     : await loadFirestoreState(projectId, familyId);
+
+  if (args.briefing) {
+    const briefing = morningBriefing(state, date);
+    if (args['out-file']) {
+      const outFile = path.resolve(args['out-file']);
+      fs.mkdirSync(path.dirname(outFile), { recursive: true });
+      fs.writeFileSync(outFile, `${JSON.stringify(briefing, null, 2)}\n`, 'utf8');
+      console.log(`Wrote ${outFile}`);
+    } else {
+      console.log(briefing.text);
+    }
+    return;
+  }
+
   const summary = dailySummary(state, date);
 
   const jsonPath = path.join(outDir, 'data', 'backups', date, 'state.json');
@@ -182,4 +343,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { dailySummary, kstDateKey, markdownReport };
+module.exports = { dailySummary, kstDateKey, markdownReport, morningBriefing };

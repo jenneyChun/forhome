@@ -1,0 +1,16 @@
+[
+  {
+    "id": "mom",
+    "label": "Mom",
+    "restApiKey": "KAKAO_REST_API_KEY_FOR_MOM_APP",
+    "refreshToken": "KAKAO_REFRESH_TOKEN_FOR_MOM",
+    "clientSecret": ""
+  },
+  {
+    "id": "dad",
+    "label": "Dad",
+    "restApiKey": "KAKAO_REST_API_KEY_FOR_DAD_APP",
+    "refreshToken": "KAKAO_REFRESH_TOKEN_FOR_DAD",
+    "clientSecret": ""
+  }
+]

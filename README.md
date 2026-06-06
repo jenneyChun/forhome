@@ -54,6 +54,23 @@ FIREBASE_SERVICE_ACCOUNT_JSON
 
 The value must be a Firebase service account JSON with permission to read Firestore.
 
+## Morning Briefing
+
+The local Windows scheduler can send the 07:00 KST ForHome briefing to mom and dad through Kakao memo-to-me.
+
+Copy and fill these local-only files:
+
+```text
+server/briefing.env.example.ps1 -> server/briefing.env.ps1
+server/kakao-recipients.example.json -> server/kakao-recipients.json
+```
+
+Then register the scheduled task from an elevated PowerShell window:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File server\setup_scheduler.ps1
+```
+
 ## Local Test Server
 
 For local development and Playwright checks, run:

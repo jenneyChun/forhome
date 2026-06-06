@@ -1,10 +1,10 @@
-# Registers the daily Kakao summary task in Windows Task Scheduler.
+# Registers the daily Kakao morning briefing task in Windows Task Scheduler.
 # Run once from an elevated PowerShell window.
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ps1Path = Join-Path $scriptDir "send_kakao.ps1"
-$taskName = "ForHome_DailySummary"
-$sendTime = "23:55"
+$taskName = "ForHome_MorningBriefing"
+$sendTime = "07:00"
 
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `

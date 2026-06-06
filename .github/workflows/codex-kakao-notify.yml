@@ -1,0 +1,40 @@
+name: Codex Kakao notification
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    env:
+      KAKAO_RECIPIENTS_JSON: ${{ secrets.KAKAO_RECIPIENTS_JSON }}
+      KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+      KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+      FORHOME_APP_URL: https://forhome-19317.web.app
+      GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Send Kakao notification
+        if: ${{ env.KAKAO_RECIPIENTS_JSON != '' }}
+        shell: pwsh
+        run: >
+          ./server/send_codex_update.ps1
+          -CommitSha "${{ github.sha }}"
+          -CommitUrl "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+          -Repository "${{ github.repository }}"
+          -Actor "${{ github.actor }}"
+          -RunUrl "$env:GITHUB_RUN_URL"
+
+      - name: Skip Kakao notification
+        if: ${{ env.KAKAO_RECIPIENTS_JSON == '' }}
+        run: echo "KAKAO_RECIPIENTS_JSON secret is not configured."
