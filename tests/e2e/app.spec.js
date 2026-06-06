@@ -63,7 +63,7 @@ test('child category requires both mom and dad approvals', async ({ context }) =
   const son = await context.newPage();
   await login(son, 'son', 'son1234');
   await son.getByTestId('tab-tasks').click();
-  await son.getByRole('button', { name: '아이' }).click();
+  await son.locator('.segmented').getByRole('button', { name: '아이', exact: true }).click();
   await son.getByTestId('proof-caption').fill('숙제를 끝냈습니다.');
   await son.getByTestId('complete-task').click();
   await expect(son.locator('#successOverlay')).toBeVisible();
@@ -124,7 +124,7 @@ test('calendar records care assignment and child care time', async ({ page }) =>
   await page.getByTestId('care-end').fill('09:00');
   await page.getByTestId('care-note').fill('등원 준비');
   await page.getByTestId('add-care-session').click();
-  await expect(page.getByText('1시간 30분')).toBeVisible();
+  await expect(page.locator('.time-total').first()).toContainText('1시간 30분');
 });
 
 test('morning briefing appears after 07:00 and input flow stays fast', async ({ page }) => {
