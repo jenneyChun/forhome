@@ -67,7 +67,7 @@ function approvalText(task, members) {
   }
   return requests.map((request) => {
     const reviewer = members.get(request.reviewerId);
-    return `${reviewer?.name || request.reviewerId}: ${statusLabel(request.status)}`;
+    return `${(reviewer && reviewer.name) || request.reviewerId}: ${statusLabel(request.status)}`;
   }).join(', ');
 }
 
@@ -84,10 +84,10 @@ function dailySummary(state, date) {
       const chore = chores.get(h.choreId);
       const reviewer = members.get(h.reviewerId);
       return {
-        memberName: member?.name || h.memberId,
-        choreName: h.choreName || chore?.name || h.choreId,
+        memberName: (member && member.name) || h.memberId,
+        choreName: h.choreName || (chore && chore.name) || h.choreId,
         status: h.verificationStatus || 'approved',
-        reviewerName: reviewer?.name || '',
+        reviewerName: (reviewer && reviewer.name) || '',
         approvals: approvalText(h, members),
         proof: h.proofImage ? 'photo' : (h.proofCaption ? 'memo' : 'none'),
         xp: Number(h.xpEarned || 0),
@@ -100,8 +100,8 @@ function dailySummary(state, date) {
       const from = members.get(m.fromId);
       const to = m.toId ? members.get(m.toId) : null;
       return {
-        from: from?.name || m.fromId,
-        to: to?.name || 'All',
+        from: (from && from.name) || m.fromId,
+        to: (to && to.name) || 'All',
         text: m.text || '',
         time: formatClock(m.timestamp)
       };
@@ -110,7 +110,7 @@ function dailySummary(state, date) {
   const careSessions = (state.careSessions || [])
     .filter((session) => session.date === date)
     .map((session) => ({
-      memberName: members.get(session.memberId)?.name || session.memberId,
+      memberName: (members.get(session.memberId) && members.get(session.memberId).name) || session.memberId,
       startTime: session.startTime || '',
       endTime: session.endTime || '',
       minutes: Number(session.minutes || 0),
@@ -123,9 +123,9 @@ function dailySummary(state, date) {
       const from = members.get(plan.fromId);
       const chore = chores.get(plan.choreId);
       return {
-        from: from?.name || plan.fromId || 'admin',
-        to: to?.name || plan.toId,
-        title: plan.title || chore?.name || plan.choreId,
+        from: (from && from.name) || plan.fromId || 'admin',
+        to: (to && to.name) || plan.toId,
+        title: plan.title || (chore && chore.name) || plan.choreId,
         note: plan.note || '',
         requestStatus: plan.requestStatus || 'accepted',
         declineReason: plan.declineReason || '',
@@ -138,8 +138,8 @@ function dailySummary(state, date) {
       const to = members.get(plan.toId);
       const chore = chores.get(plan.choreId);
       return {
-        to: to?.name || plan.toId,
-        title: plan.title || chore?.name || plan.choreId,
+        to: (to && to.name) || plan.toId,
+        title: plan.title || (chore && chore.name) || plan.choreId,
         note: plan.note || ''
       };
     });
@@ -251,8 +251,10 @@ function morningBriefing(state, date) {
   }
 
   lines.push('', 'Today care assignment');
-  lines.push(`- Morning: ${members.get(assignment.morningId)?.name || assignment.morningId || 'unassigned'}`);
-  lines.push(`- Evening: ${members.get(assignment.eveningId)?.name || assignment.eveningId || 'unassigned'}`);
+  const morningMember = members.get(assignment.morningId);
+  const eveningMember = members.get(assignment.eveningId);
+  lines.push(`- Morning: ${(morningMember && morningMember.name) || assignment.morningId || 'unassigned'}`);
+  lines.push(`- Evening: ${(eveningMember && eveningMember.name) || assignment.eveningId || 'unassigned'}`);
 
   lines.push('', `Today tasks: ${accepted.length}`);
   if (accepted.length) {
