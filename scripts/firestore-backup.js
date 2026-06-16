@@ -67,13 +67,14 @@ function approvalText(task, members) {
   }
   return requests.map((request) => {
     const reviewer = members.get(request.reviewerId);
-    return `${reviewer?.name || request.reviewerId}: ${statusLabel(request.status)}`;
+    return `${(reviewer && reviewer.name) || request.reviewerId}: ${statusLabel(request.status)}`;
   }).join(', ');
 }
 
 function dailySummary(state, date) {
   const members = new Map((state.members || []).map((m) => [m.id, m]));
   const chores = new Map((state.chores || []).map((c) => [c.id, c]));
+  const careItems = new Map((state.careItems || []).map((item) => [item.id, item]));
   const tomorrow = new Date(`${date}T00:00:00.000+09:00`);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowKey = dateKey(tomorrow.getTime());
@@ -84,11 +85,15 @@ function dailySummary(state, date) {
       const chore = chores.get(h.choreId);
       const reviewer = members.get(h.reviewerId);
       return {
-        memberName: member?.name || h.memberId,
-        choreName: h.choreName || chore?.name || h.choreId,
+        memberName: (member && member.name) || h.memberId,
+        memberRole: (member && member.role) || '',
+        choreName: h.choreName || (chore && chore.name) || h.choreId,
         status: h.verificationStatus || 'approved',
-        reviewerName: reviewer?.name || '',
+        reviewerName: (reviewer && reviewer.name) || '',
         approvals: approvalText(h, members),
+        awardMembers: (h.pointRecipients || [h.memberId]).map((id) => (members.get(id) && members.get(id).name) || id).join(', '),
+        category: h.category || (chore && chore.category) || '',
+        points: Number(h.fatigueAdded || 0),
         proof: h.proofImage ? 'photo' : (h.proofCaption ? 'memo' : 'none'),
         xp: Number(h.xpEarned || 0),
         time: formatClock(h.timestamp)
@@ -100,8 +105,8 @@ function dailySummary(state, date) {
       const from = members.get(m.fromId);
       const to = m.toId ? members.get(m.toId) : null;
       return {
-        from: from?.name || m.fromId,
-        to: to?.name || 'All',
+        from: (from && from.name) || m.fromId,
+        to: (to && to.name) || 'All',
         text: m.text || '',
         time: formatClock(m.timestamp)
       };
@@ -109,12 +114,31 @@ function dailySummary(state, date) {
   const careAssignments = (state.careAssignments || []).find((item) => item.date === date) || null;
   const careSessions = (state.careSessions || [])
     .filter((session) => session.date === date)
-    .map((session) => ({
-      memberName: members.get(session.memberId)?.name || session.memberId,
-      startTime: session.startTime || '',
-      endTime: session.endTime || '',
-      minutes: Number(session.minutes || 0),
-      note: session.note || ''
+    .map((session) => {
+      const item = careItems.get(session.careItemId);
+      return {
+        memberName: (members.get(session.memberId) && members.get(session.memberId).name) || session.memberId,
+        childName: (members.get(session.childMemberId) && members.get(session.childMemberId).name) || session.childMemberId || '',
+        itemName: (item && item.name) || session.careItemId || 'Care',
+        pointRecipients: (session.pointRecipients || [session.memberId]).map((id) => (members.get(id) && members.get(id).name) || id).join(', '),
+        points: Number(session.points || 0),
+        xp: Number(session.xpEarned || 0),
+        startTime: session.startTime || '',
+        endTime: session.endTime || '',
+        minutes: Number(session.minutes || 0),
+        note: session.note || ''
+      };
+    });
+  const itemChangeRequests = (state.changeRequests || [])
+    .filter((request) => dateKey(request.requestedAt) === date)
+    .map((request) => ({
+      type: request.type || '',
+      status: request.status || 'pending',
+      requestedBy: (members.get(request.requestedBy) && members.get(request.requestedBy).name) || request.requestedBy || 'admin',
+      beforeName: request.before && request.before.name,
+      afterName: request.after && request.after.name,
+      approvals: approvalText(request, members),
+      time: formatClock(request.requestedAt)
     }));
   const todayPlans = (state.tomorrowPlans || [])
     .filter((plan) => plan.targetDate === date)
@@ -123,9 +147,9 @@ function dailySummary(state, date) {
       const from = members.get(plan.fromId);
       const chore = chores.get(plan.choreId);
       return {
-        from: from?.name || plan.fromId || 'admin',
-        to: to?.name || plan.toId,
-        title: plan.title || chore?.name || plan.choreId,
+        from: (from && from.name) || plan.fromId || 'admin',
+        to: (to && to.name) || plan.toId,
+        title: plan.title || (chore && chore.name) || plan.choreId,
         note: plan.note || '',
         requestStatus: plan.requestStatus || 'accepted',
         declineReason: plan.declineReason || '',
@@ -138,12 +162,12 @@ function dailySummary(state, date) {
       const to = members.get(plan.toId);
       const chore = chores.get(plan.choreId);
       return {
-        to: to?.name || plan.toId,
-        title: plan.title || chore?.name || plan.choreId,
+        to: (to && to.name) || plan.toId,
+        title: plan.title || (chore && chore.name) || plan.choreId,
         note: plan.note || ''
       };
     });
-  return { date, tasks, messages, careAssignments, careSessions, todayPlans, tomorrowPlans };
+  return { date, tasks, messages, careAssignments, careSessions, itemChangeRequests, todayPlans, tomorrowPlans };
 }
 
 function markdownReport(state, summary) {
@@ -155,6 +179,7 @@ function markdownReport(state, summary) {
     `- Tasks today: ${summary.tasks.length}`,
     `- Messages today: ${summary.messages.length}`,
     `- Care sessions today: ${summary.careSessions.length}`,
+    `- Item change requests today: ${summary.itemChangeRequests.length}`,
     `- Today task requests: ${summary.todayPlans.length}`,
     `- Tomorrow plans: ${summary.tomorrowPlans.length}`,
     '',
@@ -165,7 +190,7 @@ function markdownReport(state, summary) {
   if (summary.tasks.length) {
     summary.tasks.forEach((task) => {
       const reviewer = task.reviewerName ? `, reviewer: ${task.reviewerName}` : '';
-      lines.push(`- ${task.time} ${task.memberName}: ${task.choreName} (${task.status}, ${task.proof}${reviewer}, approvals: ${task.approvals}, +${task.xp} XP)`);
+      lines.push(`- ${task.time} ${task.memberName}: ${task.choreName} (${task.status}, ${task.proof}${reviewer}, approvals: ${task.approvals}, awards: ${task.awardMembers}, +${task.points}P, +${task.xp} XP)`);
     });
   } else {
     lines.push('- No tasks recorded.');
@@ -180,10 +205,20 @@ function markdownReport(state, summary) {
   }
   if (summary.careSessions.length) {
     summary.careSessions.forEach((session) => {
-      lines.push(`- ${session.memberName}: ${session.startTime}-${session.endTime} (${formatMinutes(session.minutes)})${session.note ? ` - ${session.note}` : ''}`);
+      const child = session.childName ? `, child: ${session.childName}` : '';
+      lines.push(`- ${session.memberName}: ${session.itemName} ${session.startTime}-${session.endTime} (${formatMinutes(session.minutes)}, awards: ${session.pointRecipients}, +${session.points}P, +${session.xp} XP${child})${session.note ? ` - ${session.note}` : ''}`);
     });
   } else {
     lines.push('- No care sessions recorded.');
+  }
+
+  lines.push('', '## Item Change Requests', '');
+  if (summary.itemChangeRequests.length) {
+    summary.itemChangeRequests.forEach((request) => {
+      lines.push(`- ${request.time} ${request.requestedBy}: ${request.type} (${request.status}, approvals: ${request.approvals}, before: ${request.beforeName || 'none'}, after: ${request.afterName || 'none'})`);
+    });
+  } else {
+    lines.push('- No item change requests recorded.');
   }
 
   lines.push('', '## Today Requests', '');
@@ -227,6 +262,7 @@ function morningBriefing(state, date) {
   const assignment = todaySummary.careAssignments || {};
   const accepted = todaySummary.todayPlans.filter((plan) => plan.requestStatus === 'accepted' && plan.status !== 'closed');
   const pending = todaySummary.todayPlans.filter((plan) => plan.requestStatus === 'pending');
+  const pendingChanges = (state.changeRequests || []).filter((request) => request.status === 'pending');
   const lines = [
     `ForHome morning briefing - ${date}`,
     '',
@@ -251,8 +287,10 @@ function morningBriefing(state, date) {
   }
 
   lines.push('', 'Today care assignment');
-  lines.push(`- Morning: ${members.get(assignment.morningId)?.name || assignment.morningId || 'unassigned'}`);
-  lines.push(`- Evening: ${members.get(assignment.eveningId)?.name || assignment.eveningId || 'unassigned'}`);
+  const morningMember = members.get(assignment.morningId);
+  const eveningMember = members.get(assignment.eveningId);
+  lines.push(`- Morning: ${(morningMember && morningMember.name) || assignment.morningId || 'unassigned'}`);
+  lines.push(`- Evening: ${(eveningMember && eveningMember.name) || assignment.eveningId || 'unassigned'}`);
 
   lines.push('', `Today tasks: ${accepted.length}`);
   if (accepted.length) {
@@ -266,6 +304,13 @@ function morningBriefing(state, date) {
     pending.forEach((plan) => lines.push(`- ${plan.from} -> ${plan.to}: ${plan.title}`));
   } else {
     lines.push('- No pending task requests.');
+  }
+
+  lines.push('', `Pending item changes: ${pendingChanges.length}`);
+  if (pendingChanges.length) {
+    pendingChanges.slice(0, 5).forEach((request) => lines.push(`- ${request.type}: ${(request.after && request.after.name) || (request.before && request.before.name) || 'item'}`));
+  } else {
+    lines.push('- No pending item changes.');
   }
 
   const text = lines.join('\n');

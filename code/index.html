@@ -596,13 +596,22 @@
       tomorrowPlans: [],
       careAssignments: [],
       careSessions: [],
+      careItems: [
+        careItemSeed('edu', 'Education', 'ED', 3),
+        careItemSeed('meal', 'Meal care', 'ME', 2),
+        careItemSeed('play', 'Play care', 'PL', 2)
+      ],
+      changeRequests: [],
       badgeHistory: []
     });
     function memberSeed(id, name, emoji, restricted, color) {
-      return { id, name, emoji, restricted, color, xp: 0, totalFatigue: 0, completedTasks: 0, stickers: 0, onVacation: false, earnedBadges: [] };
+      return { id, name, emoji, restricted, role: id === 'son' ? 'child' : 'adult', color, xp: 0, totalFatigue: 0, completedTasks: 0, stickers: 0, onVacation: false, earnedBadges: [] };
     }
     function choreSeed(id, name, emoji, fatigue, category) {
       return { id, name, emoji, fatigue, xp: fatigue * 10, category };
+    }
+    function careItemSeed(id, name, emoji, points) {
+      return { id, name, emoji, points, xp: points * 10 };
     }
 
     let state = defaultState();
@@ -974,7 +983,7 @@
     function renderMemberRow(m) {
       const fatigue = weekFatigue(m.id);
       const pct = Math.min(100, Math.round(fatigue / state.settings.vacationThreshold * 100));
-      const tag = m.onVacation ? '<span class="tag amber">Rest</span>' : `<span class="tag teal">${fatigue}</span>`;
+      const tag = m.onVacation ? '<span class="tag amber">휴식 추천</span>' : `<span class="tag teal">${fatigue}P</span>`;
       return `<div class="member-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(m.name)}</strong>${tag}</div><div class="progress"><span style="width:${pct}%;background:${pct >= 90 ? 'var(--red)' : 'var(--teal)'}"></span></div></div></div>`;
     }
     function renderRankRow(m, rank, weekly) {
@@ -987,10 +996,10 @@
     }
     function renderMemberSelect(m) {
       const disabled = !canActAs(m);
-      return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? '본인/관리자' : '공동 기록'}</div></div></button>`;
+      return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${memberRole(m) === 'adult' ? '성인 권한' : '아이 권한'}</div></div></button>`;
     }
     function renderChoreSelect(c) {
-      return `<button class="chore-row ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="avatar">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP · 부담 ${c.fatigue}</span></button>`;
+      return `<button class="chore-row ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="avatar">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP · ${c.fatigue}P</span></button>`;
     }
 
     function renderDay(d, currentMonth) {
@@ -1032,7 +1041,10 @@
       const name = $('memberName').value.trim();
       if (!name) return toast('이름을 입력해 주세요');
       const id = `m${Date.now()}`;
-      state.members.push(memberSeed(id, name, $('memberEmoji').value.trim() || 'U', $('memberRestricted').value === 'true', randomColor()));
+      const role = $('memberRole')?.value || 'adult';
+      const next = memberSeed(id, name, $('memberEmoji').value.trim() || 'U', role === 'adult', randomColor());
+      next.role = role;
+      state.members.push(next);
       await saveState();
     }
     async function removeMember(id) {
@@ -1050,14 +1062,46 @@
       const name = $('choreName').value.trim();
       if (!name) return toast('집안일 이름을 입력해 주세요');
       const fatigue = clamp(Number($('choreFatigue').value || 2), 1, 10);
-      state.chores.push(choreSeed(`c${Date.now()}`, name, $('choreEmoji').value.trim() || 'OK', fatigue, $('choreCategory').value));
-      await saveState();
+      await createChangeRequest('chore.add', null, choreSeed(`c${Date.now()}`, name, $('choreEmoji').value.trim() || 'OK', fatigue, $('choreCategory').value));
     }
     async function removeChore(id) {
       if (!confirm('집안일을 삭제할까요?')) return;
-      state.chores = state.chores.filter(c => c.id !== id);
-      if (selectedChoreId === id) selectedChoreId = null;
-      await saveState();
+      const before = chore(id);
+      if (!before) return;
+      await createChangeRequest('chore.delete', before, null);
+    }
+    async function addCareItem() {
+      const name = $('careItemName')?.value.trim();
+      if (!name) return toast('육아 항목 이름을 입력해 주세요');
+      const points = clamp(Number($('careItemPoints')?.value || 2), 1, 100);
+      const next = careItemSeed(`careItem${Date.now()}`, name, $('careItemEmoji')?.value.trim() || 'CA', points);
+      await createChangeRequest('care.add', null, next);
+    }
+    async function removeCareItem(id) {
+      if (id === 'edu') return toast('교육 항목은 기본 항목이라 삭제할 수 없습니다');
+      if (!confirm('육아 항목을 삭제할까요?')) return;
+      const before = careItem(id);
+      if (!before) return;
+      await createChangeRequest('care.delete', before, null);
+    }
+    async function createChangeRequest(type, before, after) {
+      const reviewers = requiredChangeReviewers();
+      const request = {
+        id: `chg${Date.now()}`,
+        type,
+        before,
+        after,
+        requestedBy: currentMemberId() || 'admin',
+        requestedAt: Date.now(),
+        status: reviewers.length ? 'pending' : 'approved',
+        reviewedAt: reviewers.length ? null : Date.now(),
+        reviewNote: '',
+        appliedAt: null,
+        approvalRequests: reviewers.map(reviewerId => ({ reviewerId, status: 'pending', reviewedAt: null, reviewNote: '' }))
+      };
+      state.changeRequests.push(request);
+      if (!reviewers.length) applyChangeRequest(request);
+      await saveStateOptimistic(reviewers.length ? '변경 승인 요청을 보냈습니다' : '변경 사항을 반영했습니다');
     }
     async function addAccount() {
       const id = $('accountId').value.trim();
@@ -1095,8 +1139,15 @@
     }
 
     function messageOptions() { return `<option value="">전체</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
-    function parentMembers() { return PARENT_IDS.map(id => member(id)).filter(Boolean); }
+    function memberRole(m) { return m?.role || (m?.id === 'son' ? 'child' : 'adult'); }
+    function adultMembers() { return state.members.filter(m => memberRole(m) === 'adult'); }
+    function childMembers() { return state.members.filter(m => memberRole(m) === 'child'); }
+    function isAdultMember(id) { return adultMembers().some(m => m.id === id); }
+    function parentMembers() { return adultMembers().length ? adultMembers() : PARENT_IDS.map(id => member(id)).filter(Boolean); }
     function parentOptions(selected = '') { return parentMembers().map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join(''); }
+    function childOptions(selected = '') { return childMembers().map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join(''); }
+    function careItem(id) { return (state.careItems || []).find(item => item.id === id); }
+    function careItemOptions(selected = 'edu') { return (state.careItems || []).map(item => `<option value="${item.id}" ${item.id === selected ? 'selected' : ''}>${escapeHtml(item.emoji)} ${escapeHtml(item.name)} (${item.points}P)</option>`).join(''); }
     function firstAllowedMember() { return state.members.find(canActAs); }
     function canActAs(m) {
       if (!m || !session) return false;
@@ -1104,16 +1155,20 @@
       if (session.memberId === m.id) return true;
       return !m.restricted;
     }
-    function canEditCare() { return !!session && (session.isAdmin || PARENT_IDS.includes(session.memberId)); }
+    function canEditCare() { return !!session && (session.isAdmin || isAdultMember(session.memberId)); }
     function canRespondPlan(plan) { return !!session && (session.isAdmin || plan.toId === session.memberId); }
     function account(id) { return state.accounts.find(a => a.id === id); }
     function member(id) { return state.members.find(m => m.id === id); }
     function chore(id) { return state.chores.find(c => c.id === id); }
-    function countFor(m, h) { return m ? h.filter(x => x.memberId === m.id).length : 0; }
-    function xpFor(m, h) { return m ? h.filter(x => x.memberId === m.id).reduce((s, x) => s + Number(x.xpEarned || 0), 0) : 0; }
-    function fatigueFor(m, h) { return m ? h.filter(x => x.memberId === m.id).reduce((s, x) => s + Number(x.fatigueAdded || 0), 0) : 0; }
-    function weekFatigue(memberId) { return weekHistory().filter(x => x.memberId === memberId).reduce((s, x) => s + Number(x.fatigueAdded || 0), 0); }
-    function weekHistory() { const ws = weekStartTs(); return state.history.filter(h => Number(h.timestamp) >= ws); }
+    function isAwardedTo(item, memberId) { return item?.memberId === memberId || (Array.isArray(item?.pointRecipients) && item.pointRecipients.includes(memberId)); }
+    function countFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).length : 0; }
+    function xpFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).reduce((s, x) => s + Number(x.xpEarned || 0), 0) : 0; }
+    function fatigueFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).reduce((s, x) => s + Number(x.fatigueAdded || x.points || 0), 0) : 0; }
+    function weekFatigue(memberId) { return weekHistory().filter(x => isAwardedTo(x, memberId)).reduce((s, x) => s + Number(x.fatigueAdded || x.points || 0), 0); }
+    function weekHistory() {
+      const ws = weekStartTs();
+      return state.history.filter(h => Number(h.timestamp) >= ws).concat(carePointEntries().filter(h => Number(h.timestamp) >= ws));
+    }
     function weekStartTs() { return weekStartTsFor(state); }
     function weekStartTsFor(target) {
       const d = new Date();
@@ -1127,6 +1182,18 @@
     function plansForDate(key) { return state.tomorrowPlans.filter(p => p.targetDate === key).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)); }
     function careAssignmentFor(key) { return state.careAssignments.find(a => a.date === key) || { date: key, morningId: 'mom', eveningId: 'dad', updatedAt: null }; }
     function careSessionsFor(key) { return state.careSessions.filter(s => s.date === key).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime))); }
+    function carePointEntries() {
+      return (state.careSessions || []).map(s => ({
+        id: s.id,
+        memberId: s.memberId,
+        pointRecipients: Array.isArray(s.pointRecipients) ? s.pointRecipients : [s.memberId],
+        fatigueAdded: Number(s.points || 0),
+        xpEarned: Number(s.xpEarned || 0),
+        timestamp: s.createdAt || nowMs(),
+        verificationStatus: 'approved',
+        category: 'care'
+      }));
+    }
     function careMinutesFor(key) { return careSessionsFor(key).reduce((sum, s) => sum + Number(s.minutes || 0), 0); }
     function careMinutesByMember(key) {
       const result = {};
@@ -1176,8 +1243,8 @@
     let currentProofPromise = null;
     const REVIEW_STATUS = {
       pending: { label: '확인 대기', className: 'amber' },
-      approved: { label: '확인됨', className: 'teal' },
-      rejected: { label: '다시 확인', className: 'red' }
+      approved: { label: '확인 완료', className: 'teal' },
+      rejected: { label: '다시 확인 요청', className: 'red' }
     };
     const REQUEST_STATUS = {
       pending: { label: '승인 대기', className: 'amber' },
@@ -1186,10 +1253,12 @@
     };
 
     function requiredReviewersFor(memberId, category) {
-      if (category === 'child' && memberId === 'son') return parentMembers().length ? parentMembers().map(m => m.id) : PARENT_IDS;
+      const adults = parentMembers().map(m => m.id).filter(id => id !== memberId);
+      const actor = member(memberId);
+      if (category === 'child' && memberRole(actor) === 'child') return adults;
       if (memberId === 'mom' && member('dad')) return ['dad'];
       if (memberId === 'dad' && member('mom')) return ['mom'];
-      if (category === 'child') return PARENT_IDS.filter(id => id !== memberId && member(id));
+      if (category === 'child') return adults;
       return reviewableMembers(memberId).slice(0, 1).map(m => m.id);
     }
 
@@ -1214,6 +1283,17 @@
 
     function requestMeta(status) { return REQUEST_STATUS[status] || REQUEST_STATUS.pending; }
 
+    function reviewProgressText(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '확인 없이 공유됨';
+      return requests.map(r => {
+        const name = member(r.reviewerId)?.name || r.reviewerId;
+        if (r.status === 'approved') return `${name} 확인 완료`;
+        if (r.status === 'rejected') return `${name} 다시 확인 요청`;
+        return `${name} 확인 대기`;
+      }).join(', ');
+    }
+
     function reviewTargetsFor(entry) {
       const requests = entry.approvalRequests || [];
       if (session?.isAdmin) return requests.filter(r => r.status === 'pending');
@@ -1236,7 +1316,7 @@
       const base = defaultState();
       const merged = { ...base, ...(next || {}) };
       merged.settings = { ...base.settings, ...(next?.settings || {}) };
-      merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m })) : base.members;
+      merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m, role: m.role || (m.id === 'son' ? 'child' : 'adult') })) : base.members;
       merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
       base.chores.forEach(seed => {
         if (!merged.chores.some(c => c.id === seed.id)) merged.chores.push(seed);
@@ -1247,6 +1327,11 @@
       merged.tomorrowPlans = Array.isArray(next?.tomorrowPlans) ? next.tomorrowPlans.map(normalizePlan) : [];
       merged.careAssignments = Array.isArray(next?.careAssignments) ? next.careAssignments.map(normalizeCareAssignment) : [];
       merged.careSessions = Array.isArray(next?.careSessions) ? next.careSessions.map(normalizeCareSession).filter(Boolean) : [];
+      merged.careItems = Array.isArray(next?.careItems) ? next.careItems.map(normalizeCareItem).filter(Boolean) : base.careItems;
+      base.careItems.forEach(seed => {
+        if (!merged.careItems.some(item => item.id === seed.id)) merged.careItems.push(seed);
+      });
+      merged.changeRequests = Array.isArray(next?.changeRequests) ? next.changeRequests.map(normalizeChangeRequest).filter(Boolean) : [];
       merged.badgeHistory = Array.isArray(next?.badgeHistory) ? next.badgeHistory : [];
       updateVacationFlags(merged);
       return merged;
@@ -1294,22 +1379,54 @@
       return { status: 'open', requestStatus, note: '', declineReason: '', respondedAt: null, createdAt: Date.now(), ...plan, requestStatus };
     }
 
+    function normalizeCareItem(item) {
+      if (!item?.id || !item?.name) return null;
+      const points = clamp(Number(item.points || item.fatigue || 1), 1, 100);
+      return { id: item.id, name: item.name, emoji: item.emoji || 'CA', points, xp: Number(item.xp || points * 10) };
+    }
+
+    function normalizeChangeRequest(request) {
+      if (!request?.id || !request?.type) return null;
+      const normalized = {
+        before: null,
+        after: null,
+        requestedBy: null,
+        requestedAt: Date.now(),
+        status: 'pending',
+        reviewedAt: null,
+        reviewNote: '',
+        appliedAt: null,
+        approvalRequests: [],
+        ...request
+      };
+      normalized.approvalRequests = Array.isArray(request.approvalRequests)
+        ? request.approvalRequests.map(r => ({ reviewerId: r.reviewerId, status: r.status || 'pending', reviewedAt: r.reviewedAt || null, reviewNote: r.reviewNote || '' })).filter(r => r.reviewerId)
+        : [];
+      return normalized;
+    }
+
     function normalizeCareAssignment(item) {
       return {
         date: item.date || dateKey(nowMs()),
-        morningId: PARENT_IDS.includes(item.morningId) ? item.morningId : 'mom',
-        eveningId: PARENT_IDS.includes(item.eveningId) ? item.eveningId : 'dad',
+        morningId: isAdultMember(item.morningId) ? item.morningId : (parentMembers()[0]?.id || 'mom'),
+        eveningId: isAdultMember(item.eveningId) ? item.eveningId : (parentMembers()[1]?.id || parentMembers()[0]?.id || 'dad'),
         updatedAt: item.updatedAt || null
       };
     }
 
     function normalizeCareSession(item) {
-      if (!item?.memberId || !PARENT_IDS.includes(item.memberId)) return null;
+      if (!item?.memberId || !isAdultMember(item.memberId)) return null;
       const minutes = Number(item.minutes || minutesBetween(item.startTime, item.endTime) || 0);
+      const selectedCareItem = careItem(item.careItemId) || careItem('edu') || (state.careItems || [])[0];
       return {
         id: item.id || `care${Date.now()}`,
         date: item.date || dateKey(item.timestamp || nowMs()),
         memberId: item.memberId,
+        careItemId: selectedCareItem?.id || item.careItemId || 'edu',
+        childMemberId: item.childMemberId || childMembers()[0]?.id || '',
+        pointRecipients: Array.isArray(item.pointRecipients) ? item.pointRecipients : [item.memberId],
+        points: Number(item.points || selectedCareItem?.points || 0),
+        xpEarned: Number(item.xpEarned || selectedCareItem?.xp || 0),
         startTime: item.startTime || '09:00',
         endTime: item.endTime || '10:00',
         minutes: Math.max(0, minutes),
@@ -1321,7 +1438,7 @@
     function renderHome() {
       const today = todayHistory();
       const approved = today.filter(x => x.verificationStatus === 'approved');
-      const pending = pendingReviews();
+      const todayPending = today.filter(x => x.verificationStatus === 'pending');
       const leader = workRanking(approved)[0];
       const todayKeyValue = dateKey(nowMs());
       const todayPlans = plansForDate(todayKeyValue).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
@@ -1334,18 +1451,22 @@
             <div class="metric-row">
               <div class="metric"><span>기록</span><strong>${today.length}</strong></div>
               <div class="metric"><span>확인 완료</span><strong>${approved.length}</strong></div>
-              <div class="metric"><span>확인 대기</span><strong>${pending.length}</strong></div>
+              <div class="metric"><span>확인 대기</span><strong>${todayPending.length}</strong></div>
             </div>
           </div>
           <div class="panel span-7">
-            <div class="panel-head"><div class="panel-title">오늘 누가 더 많이 했나</div><span class="mini">확인 완료 기준</span></div>
-            ${leader ? `<div class="rank-row"><div class="avatar" style="background:${softColor(leader.member?.color)}">${escapeHtml(leader.member?.emoji || '')}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(leader.member?.name || '알 수 없음')}</strong><span class="tag teal">${leader.count}건 · 부담 ${leader.load}</span></div><div class="mini">${leader.items.map(x => escapeHtml(x.choreName)).join(', ')}</div></div></div>` : '<div class="empty">아직 확인 완료된 기록이 없어요</div>'}
+            <div class="panel-head"><div class="panel-title">오늘의 수고 균형</div><span class="mini">확인 완료 기준</span></div>
+            ${leader ? `<div class="rank-row"><div class="avatar" style="background:${softColor(leader.member?.color)}">${escapeHtml(leader.member?.emoji || '')}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(leader.member?.name || '알 수 없음')}님의 수고 포인트가 쌓였어요</strong><span class="tag teal">${leader.count}건 · ${leader.load}P</span></div><div class="mini">확인된 일: ${leader.items.map(x => escapeHtml(x.choreName)).join(', ')}</div></div></div>` : '<div class="empty">아직 확인 완료된 기록이 없어요</div>'}
           </div>
           <div class="panel span-6">
-            <div class="panel-head"><div class="panel-title">오늘 한 일</div></div>
-            <div class="list">${today.length ? today.map(renderActivity).join('') : '<div class="empty">오늘 기록이 없어요</div>'}</div>
+            <div class="panel-head"><div class="panel-title">오늘 가족 피드</div><span class="mini">확인 완료된 기록</span></div>
+            <div class="list">${approved.length ? approved.map(renderActivity).join('') : '<div class="empty">아직 가족 피드에 올라온 확인 완료 기록이 없어요</div>'}</div>
           </div>
           <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">확인 대기 중</div><span class="tag amber">${todayPending.length}</span></div>
+            <div class="list">${todayPending.length ? todayPending.map(renderActivity).join('') : '<div class="empty">오늘 확인을 기다리는 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
             <div class="panel-head"><div class="panel-title">오늘 해야 할 일</div><span class="tag">${todayPlans.length}</span></div>
             <div class="list">${todayPlans.length ? todayPlans.map(renderPlan).join('') : '<div class="empty">승인된 오늘 할 일이 없어요</div>'}</div>
           </div>
@@ -1429,7 +1550,7 @@
               <label for="proofCaption">메모</label>
               <textarea id="proofCaption" data-testid="proof-caption" placeholder="예: 싱크대 정리까지 끝냈음"></textarea>
             </div>
-            <button class="btn primary full" data-testid="complete-task" onclick="completeTask()">완료 알림 보내기</button>
+            <button class="btn primary full" data-testid="complete-task" onclick="completeTask()">확인 요청 보내기</button>
           </div>
         </div>`;
       currentProof = null;
@@ -1438,6 +1559,7 @@
 
     function renderBadges() {
       const pending = pendingReviews();
+      const pendingChanges = pendingChangeRequests();
       const mine = state.history
         .filter(h => session?.isAdmin || h.approvalRequests?.some(r => r.reviewerId === currentMemberId()))
         .sort((a, b) => b.timestamp - a.timestamp)
@@ -1445,8 +1567,12 @@
       $('section-badges').innerHTML = `
         <div class="grid">
           <div class="panel span-12">
-            <div class="panel-head"><div class="panel-title">확인 대기</div><span class="tag amber">${pending.length}</span></div>
+            <div class="panel-head"><div class="panel-title">${session?.isAdmin ? '전체 확인 대기' : '내가 확인할 것'}</div><span class="tag amber">${pending.length}</span></div>
             <div class="list">${pending.length ? pending.map(renderReviewItem).join('') : '<div class="empty">확인할 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">설정 변경 승인</div><span class="tag amber">${pendingChanges.length}</span></div>
+            <div class="list">${pendingChanges.length ? pendingChanges.map(renderChangeRequestItem).join('') : '<div class="empty">승인할 설정 변경이 없어요</div>'}</div>
           </div>
           <div class="panel span-12">
             <div class="panel-head"><div class="panel-title">최근 검토 기록</div></div>
@@ -1506,9 +1632,12 @@
           <div class="panel span-6">
             <div class="panel-head"><div class="panel-title">아이 본 시간</div><span class="time-total">${formatMinutes(careMinutesFor(targetDate))}</span></div>
             <div class="form-grid">
-              <div class="field col-4"><label for="careMember">담당</label><select id="careMember" data-testid="care-member" ${canEditCare() ? '' : 'disabled'}>${parentOptions(currentMemberId() && PARENT_IDS.includes(currentMemberId()) ? currentMemberId() : assignment.morningId)}</select></div>
+              <div class="field col-4"><label for="careItem">항목</label><select id="careItem" data-testid="care-item" ${canEditCare() ? '' : 'disabled'}>${careItemOptions('edu')}</select></div>
+              <div class="field col-4"><label for="careMember">담당</label><select id="careMember" data-testid="care-member" ${canEditCare() ? '' : 'disabled'}>${parentOptions(currentMemberId() && isAdultMember(currentMemberId()) ? currentMemberId() : assignment.morningId)}</select></div>
+              <div class="field col-4"><label for="careChild">아이</label><select id="careChild" data-testid="care-child" ${canEditCare() ? '' : 'disabled'}>${childOptions(childMembers()[0]?.id || '')}</select></div>
               <div class="field col-4"><label for="careStart">시작</label><input id="careStart" data-testid="care-start" type="time" value="09:00" ${canEditCare() ? '' : 'disabled'}></div>
               <div class="field col-4"><label for="careEnd">종료</label><input id="careEnd" data-testid="care-end" type="time" value="10:00" ${canEditCare() ? '' : 'disabled'}></div>
+              <div class="field col-4"><label>포인트</label><input value="교육은 성인+아이 지급" disabled></div>
               <div class="field col-12"><label for="careNote">메모</label><input id="careNote" data-testid="care-note" placeholder="예: 등원 준비와 아침 식사" ${canEditCare() ? '' : 'disabled'}></div>
               <button class="btn primary col-12" data-testid="add-care-session" ${canEditCare() ? '' : 'disabled'} onclick="addCareSession()">육아 시간 추가</button>
             </div>
@@ -1535,7 +1664,7 @@
           <div class="panel span-6">
             <div class="panel-head"><div class="panel-title">운영 설정</div></div>
             <div class="form-grid">
-              <div class="field col-6"><label>휴식 기준</label><input id="vacationThreshold" type="number" min="5" max="100" value="${state.settings.vacationThreshold}"></div>
+              <div class="field col-6"><label>휴식 포인트 기준</label><input id="vacationThreshold" type="number" min="5" max="100" value="${state.settings.vacationThreshold}"></div>
               <div class="field col-6"><label>주 시작</label><select id="weekStartsOn"><option value="1" ${state.settings.weekStartsOn === 1 ? 'selected' : ''}>월요일</option><option value="0" ${state.settings.weekStartsOn === 0 ? 'selected' : ''}>일요일</option></select></div>
               <button class="btn primary col-6" onclick="saveSettings()">저장</button>
               <button class="btn col-6" onclick="exportDailySummary()">오늘 요약 준비</button>
@@ -1548,7 +1677,7 @@
             <div class="form-grid">
               <div class="field col-3"><label>표시</label><input id="memberEmoji" maxlength="4" value="가"></div>
               <div class="field col-4"><label>이름</label><input id="memberName" placeholder="이름"></div>
-              <div class="field col-3"><label>권한</label><select id="memberRestricted"><option value="false">공동</option><option value="true">본인</option></select></div>
+              <div class="field col-3"><label>권한</label><select id="memberRole"><option value="adult">성인</option><option value="child">아이</option></select></div>
               <button class="btn primary col-2" onclick="addMember()">추가</button>
             </div>
             <div class="list" style="margin-top:10px;">${state.members.map(renderMemberSetting).join('')}</div>
@@ -1559,10 +1688,20 @@
               <div class="field col-2"><label>표시</label><input id="choreEmoji" maxlength="4" value="일"></div>
               <div class="field col-4"><label>이름</label><input id="choreName" placeholder="집안일"></div>
               <div class="field col-3"><label>분류</label><select id="choreCategory">${Object.entries(CATEGORIES).filter(x => x[0] !== 'all').map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div>
-              <div class="field col-2"><label>부담</label><input id="choreFatigue" type="number" min="1" max="10" value="2"></div>
+              <div class="field col-2"><label>포인트</label><input id="choreFatigue" type="number" min="1" max="10" value="2"></div>
               <button class="btn primary col-1" onclick="addChore()">+</button>
             </div>
             <div class="list" style="margin-top:10px;">${state.chores.map(renderChoreSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">육아 항목</div><span class="tag">교육 기본 포함</span></div>
+            <div class="form-grid">
+              <div class="field col-2"><label>표시</label><input id="careItemEmoji" maxlength="4" value="돌"></div>
+              <div class="field col-6"><label>이름</label><input id="careItemName" placeholder="육아 항목"></div>
+              <div class="field col-3"><label>포인트</label><input id="careItemPoints" type="number" min="1" max="100" value="2"></div>
+              <button class="btn primary col-1" onclick="addCareItem()">+</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${(state.careItems || []).map(renderCareItemSetting).join('')}</div>
           </div>
           <div class="panel span-6">
             <div class="panel-head"><div class="panel-title">계정</div></div>
@@ -1582,12 +1721,23 @@
       const c = chore(entry.choreId);
       const status = statusMeta(entry.verificationStatus);
       const proof = entry.proofImage ? `<img class="photo-cell" src="${entry.proofImage}" alt="증빙 사진">` : `<div class="photo-cell" style="display:grid;place-items:center;color:var(--muted);font-size:12px;">사진 없음</div>`;
-      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 부담 ${entry.fatigueAdded || 0}</div><div class="approval-list">${approvalBadges(entry)}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">검토 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
+      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 가족에게 공유된 수고 · ${entry.fatigueAdded || 0}P · ${entry.xpEarned || 0}XP</div><div class="approval-list">${approvalBadges(entry)}</div><div class="mini">${escapeHtml(reviewProgressText(entry))}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">다시 확인 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
     }
 
     function renderReviewItem(entry) {
       const canReview = canReviewEntry(entry);
-      return `<div class="review-row">${renderActivity(entry)}<div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
+      return `<div class="review-row">${renderActivity(entry)}<div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인했어요</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
+    }
+
+    function renderChangeRequestItem(request) {
+      const requester = member(request.requestedBy);
+      const target = request.after || request.before || {};
+      const label = request.type.includes('chore') ? '집안일 항목' : '육아 항목';
+      const action = request.type.endsWith('add') ? '추가' : (request.type.endsWith('delete') ? '삭제' : '수정');
+      const canReview = canReviewChange(request);
+      const beforeText = request.before ? `${request.before.name} ${request.before.fatigue || request.before.points || 0}P` : '없음';
+      const afterText = request.after ? `${request.after.name} ${request.after.fatigue || request.after.points || 0}P` : '없음';
+      return `<div class="plan-row"><div class="name-line"><strong>${label} ${action}: ${escapeHtml(target.name || '항목')}</strong><span class="tag amber">승인 대기</span></div><div class="mini">요청자: ${escapeHtml(requester?.name || request.requestedBy || '관리자')} · ${formatTime(request.requestedAt)}</div><div class="mini">변경 전: ${escapeHtml(beforeText)} / 변경 후: ${escapeHtml(afterText)}</div><div class="approval-list">${approvalBadges(request)}</div><div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveChangeRequest('${request.id}')">승인</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectChangeRequest('${request.id}')">반려</button></div></div>`;
     }
 
     function renderPlan(plan) {
@@ -1604,15 +1754,23 @@
 
     function renderCareSession(item) {
       const m = member(item.memberId);
-      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(m?.name || item.memberId)} · ${formatMinutes(item.minutes)}</strong><span class="tag teal">${item.startTime}-${item.endTime}</span></div>${item.note ? `<div class="mini">${escapeHtml(item.note)}</div>` : ''}</div>`;
+      const c = member(item.childMemberId);
+      const selectedCareItem = careItem(item.careItemId);
+      const recipients = (item.pointRecipients || [item.memberId]).map(id => member(id)?.name || id).join(', ');
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(m?.name || item.memberId)} · ${escapeHtml(selectedCareItem?.name || '육아')} · ${formatMinutes(item.minutes)}</strong><span class="tag teal">${item.points || 0}P</span></div><div class="mini">${item.startTime}-${item.endTime}${c ? ` · 아이: ${escapeHtml(c.name)}` : ''} · 포인트: ${escapeHtml(recipients)}</div>${item.note ? `<div class="mini">${escapeHtml(item.note)}</div>` : ''}</div>`;
     }
 
     function renderMemberSetting(m) {
-      return `<div class="account-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><strong>${escapeHtml(m.name)}</strong><div class="mini">${m.restricted ? '본인/관리자 기록' : '공동 기록'}</div></div><button class="btn icon danger" onclick="removeMember('${m.id}')">X</button></div>`;
+      return `<div class="account-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><strong>${escapeHtml(m.name)}</strong><div class="mini">${memberRole(m) === 'adult' ? '성인 권한' : '아이 권한'}</div></div><button class="btn icon danger" onclick="removeMember('${m.id}')">X</button></div>`;
     }
 
     function renderChoreSetting(c) {
-      return `<div class="account-row"><div class="avatar">${escapeHtml(c.emoji)}</div><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="mini">${CATEGORIES[c.category]} · 부담 ${c.fatigue} · ${c.xp}XP</div></div><button class="btn icon danger" onclick="removeChore('${c.id}')">X</button></div>`;
+      return `<div class="account-row"><div class="avatar">${escapeHtml(c.emoji)}</div><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="mini">${CATEGORIES[c.category]} · ${c.fatigue}P · ${c.xp}XP</div></div><button class="btn icon danger" onclick="removeChore('${c.id}')">X</button></div>`;
+    }
+
+    function renderCareItemSetting(item) {
+      const locked = item.id === 'edu';
+      return `<div class="account-row"><div class="avatar">${escapeHtml(item.emoji)}</div><div class="grow"><strong>${escapeHtml(item.name)}</strong><div class="mini">${item.points}P · ${item.xp}XP${locked ? ' · 기본 항목' : ''}</div></div><button class="btn icon danger" ${locked ? 'disabled' : ''} onclick="removeCareItem('${item.id}')">X</button></div>`;
     }
 
     function renderAccountSetting(acc) {
@@ -1627,7 +1785,7 @@
       return requests.map(r => {
         const meta = statusMeta(r.status);
         const reviewer = member(r.reviewerId);
-        return `<span class="tag ${meta.className}">${escapeHtml(reviewer?.name || r.reviewerId)} ${meta.label}</span>`;
+        return `<span class="tag ${meta.className}">${escapeHtml(reviewer?.name || r.reviewerId)} ${r.status === 'approved' ? '확인 완료' : (r.status === 'rejected' ? '다시 확인 요청' : '확인 대기')}</span>`;
       }).join('');
     }
 
@@ -1731,7 +1889,7 @@
     async function approveTask(id) {
       const entry = state.history.find(h => h.id === id);
       if (!entry || !canReviewEntry(entry)) return;
-      const note = prompt('확인 메모', '확인했습니다') || '확인했습니다';
+      const note = prompt('확인 메모', '확인했어요') || '확인했어요';
       reviewTargetsFor(entry).forEach(req => {
         req.status = 'approved';
         req.reviewedAt = Date.now();
@@ -1740,7 +1898,7 @@
       syncEntryReviewStatus(entry);
       if (entry.verificationStatus === 'approved') grantBadges(member(entry.memberId));
       applyMemberTotals();
-      await saveStateOptimistic('확인 완료');
+      await saveStateOptimistic('확인했어요');
     }
 
     async function rejectTask(id) {
@@ -1756,6 +1914,72 @@
       syncEntryReviewStatus(entry);
       applyMemberTotals();
       await saveStateOptimistic('다시 확인 요청됨');
+    }
+
+    function requiredChangeReviewers() {
+      const requester = currentMemberId();
+      const adults = parentMembers().map(m => m.id).filter(id => id !== requester);
+      if (adults.length) return adults;
+      return state.members.map(m => m.id).filter(id => id !== requester);
+    }
+
+    function changeReviewTargetsFor(request) {
+      const requests = request.approvalRequests || [];
+      if (session?.isAdmin) return requests.filter(r => r.status === 'pending');
+      return requests.filter(r => r.reviewerId === session?.memberId && r.status === 'pending');
+    }
+
+    function canReviewChange(request) {
+      return !!session && request.status === 'pending' && changeReviewTargetsFor(request).length > 0;
+    }
+
+    function pendingChangeRequests() {
+      return (state.changeRequests || []).filter(r => r.status === 'pending' && (!session || canReviewChange(r))).sort((a, b) => b.requestedAt - a.requestedAt);
+    }
+
+    function syncChangeRequestStatus(request) {
+      const approvals = request.approvalRequests || [];
+      if (approvals.some(r => r.status === 'rejected')) request.status = 'rejected';
+      else if (!approvals.length || approvals.every(r => r.status === 'approved')) request.status = 'approved';
+      else request.status = 'pending';
+      return request.status;
+    }
+
+    function applyChangeRequest(request) {
+      if (!request || request.appliedAt) return;
+      if (request.type === 'chore.add' && request.after) state.chores.push(request.after);
+      if (request.type === 'chore.delete' && request.before) state.chores = state.chores.filter(c => c.id !== request.before.id);
+      if (request.type === 'care.add' && request.after) state.careItems.push(request.after);
+      if (request.type === 'care.delete' && request.before) state.careItems = state.careItems.filter(item => item.id !== request.before.id || item.id === 'edu');
+      request.appliedAt = Date.now();
+      if (selectedChoreId && !state.chores.some(c => c.id === selectedChoreId)) selectedChoreId = null;
+    }
+
+    async function approveChangeRequest(id) {
+      const request = (state.changeRequests || []).find(r => r.id === id);
+      if (!request || !canReviewChange(request)) return;
+      const note = prompt('승인 메모', '좋아요') || '좋아요';
+      changeReviewTargetsFor(request).forEach(req => {
+        req.status = 'approved';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      if (syncChangeRequestStatus(request) === 'approved') applyChangeRequest(request);
+      await saveStateOptimistic('설정 변경을 확인했습니다');
+    }
+
+    async function rejectChangeRequest(id) {
+      const request = (state.changeRequests || []).find(r => r.id === id);
+      if (!request || !canReviewChange(request)) return;
+      const note = promptRequired('반려 이유', '가족과 다시 상의해 주세요');
+      if (!note) return;
+      changeReviewTargetsFor(request).forEach(req => {
+        req.status = 'rejected';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncChangeRequestStatus(request);
+      await saveStateOptimistic('설정 변경을 반려했습니다');
     }
 
     async function addTomorrowPlan() {
@@ -1831,29 +2055,38 @@
       if (!canEditCare()) return;
       const date = selectedDate || dateKey(nowMs());
       const memberId = $('careMember')?.value;
+      const childMemberId = $('careChild')?.value || '';
+      const selectedCareItem = careItem($('careItem')?.value) || careItem('edu') || (state.careItems || [])[0];
       const startTime = $('careStart')?.value;
       const endTime = $('careEnd')?.value;
       const minutes = minutesBetween(startTime, endTime);
-      if (!memberId || !PARENT_IDS.includes(memberId)) return toast('엄마 또는 아빠를 선택해 주세요');
+      if (!memberId || !isAdultMember(memberId)) return toast('성인 권한 구성원을 선택해 주세요');
       if (!startTime || !endTime || minutes <= 0) return toast('시작/종료 시간을 확인해 주세요');
+      const pointRecipients = selectedCareItem?.id === 'edu' && childMemberId ? [memberId, childMemberId] : [memberId];
       state.careSessions.push({
         id: `care${Date.now()}`,
         date,
         memberId,
+        childMemberId,
+        careItemId: selectedCareItem?.id || 'edu',
+        pointRecipients,
+        points: Number(selectedCareItem?.points || 0),
+        xpEarned: Number(selectedCareItem?.xp || 0),
         startTime,
         endTime,
         minutes,
         note: $('careNote')?.value.trim() || '',
         createdAt: Date.now()
       });
+      applyMemberTotals();
       await saveStateOptimistic('육아 시간을 저장했습니다');
     }
 
     function applyMemberTotals() {
       state.members.forEach(m => {
-        const approved = state.history.filter(h => h.memberId === m.id && h.verificationStatus === 'approved');
+        const approved = state.history.filter(h => h.verificationStatus === 'approved' && isAwardedTo(h, m.id)).concat(carePointEntries().filter(h => isAwardedTo(h, m.id)));
         m.completedTasks = approved.length;
-        m.totalFatigue = approved.reduce((s, h) => s + Number(h.fatigueAdded || 0), 0);
+        m.totalFatigue = approved.reduce((s, h) => s + Number(h.fatigueAdded || h.points || 0), 0);
         m.xp = approved.reduce((s, h) => s + Number(h.xpEarned || 0), 0);
         m.stickers = approved.length;
       });
@@ -1898,8 +2131,11 @@
     function updateVacationFlags(target) {
       const limit = Number(target.settings?.vacationThreshold || 25);
       const weekStart = weekStartTsFor(target);
+      const careEntries = (target.careSessions || []).filter(s => Number(s.createdAt || 0) >= weekStart);
       target.members?.forEach(m => {
-        m.onVacation = target.history.filter(h => h.memberId === m.id && h.verificationStatus === 'approved' && Number(h.timestamp) >= weekStart).reduce((sum, h) => sum + Number(h.fatigueAdded || 0), 0) >= limit;
+        const workPoints = target.history.filter(h => h.verificationStatus === 'approved' && (h.memberId === m.id || h.pointRecipients?.includes(m.id)) && Number(h.timestamp) >= weekStart).reduce((sum, h) => sum + Number(h.fatigueAdded || 0), 0);
+        const carePoints = careEntries.filter(s => s.memberId === m.id || s.pointRecipients?.includes(m.id)).reduce((sum, s) => sum + Number(s.points || 0), 0);
+        m.onVacation = workPoints + carePoints >= limit;
       });
     }
 
@@ -1914,11 +2150,14 @@
     function workRanking(items) {
       const map = new Map();
       items.forEach(item => {
-        const current = map.get(item.memberId) || { member: member(item.memberId), count: 0, load: 0, items: [] };
-        current.count += 1;
-        current.load += Number(item.fatigueAdded || 0);
-        current.items.push(item);
-        map.set(item.memberId, current);
+        const recipients = Array.isArray(item.pointRecipients) && item.pointRecipients.length ? item.pointRecipients : [item.memberId];
+        recipients.forEach(memberId => {
+          const current = map.get(memberId) || { member: member(memberId), count: 0, load: 0, items: [] };
+          current.count += 1;
+          current.load += Number(item.fatigueAdded || item.points || 0);
+          current.items.push(item);
+          map.set(memberId, current);
+        });
       });
       return [...map.values()].sort((a, b) => b.load - a.load || b.count - a.count);
     }
