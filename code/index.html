@@ -554,7 +554,7 @@
     const FORCED_NOW = URL_PARAMS.get('now');
     const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
     const TEST_MODE = STORAGE_MODE === 'test'
-      || (!STORAGE_MODE && LOCAL_HOSTS.has(location.hostname))
+      || (!STORAGE_MODE && isLocalTestHost(location.hostname))
       || window.__FORHOME_TEST__ === true;
     const PARENT_IDS = ['mom', 'dad'];
     const BRIEFING_HOUR = 7;
@@ -612,6 +612,16 @@
     }
     function careItemSeed(id, name, emoji, points) {
       return { id, name, emoji, points, xp: points * 10 };
+    }
+
+    function isLocalTestHost(hostname) {
+      const host = String(hostname || '').toLowerCase();
+      if (LOCAL_HOSTS.has(host)) return true;
+      if (host.endsWith('.local')) return true;
+      if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      return false;
     }
 
     let state = defaultState();
