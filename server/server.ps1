@@ -8,6 +8,8 @@ $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
 $ClientRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "code"))
 $LogDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "log"))
 
+. (Join-Path $ScriptDir "db.ps1")
+
 function Write-AppLog($Message) {
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -18,19 +20,46 @@ function Write-AppLog($Message) {
 function Get-ReasonPhrase($Status) {
     switch ($Status) {
         200 { "OK" }
+        201 { "Created" }
         204 { "No Content" }
+        400 { "Bad Request" }
+        401 { "Unauthorized" }
+        403 { "Forbidden" }
         404 { "Not Found" }
         405 { "Method Not Allowed" }
-        410 { "Gone" }
         500 { "Internal Server Error" }
         default { "OK" }
     }
 }
 
-function Send-Bytes($Client, $Status, $ContentType, [byte[]]$Bytes) {
-    $stream = $Client.GetStream()
+function New-HeaderText($Status, $ContentType, $Length, $ExtraHeaders) {
     $reason = Get-ReasonPhrase $Status
-    $headers = "HTTP/1.1 $Status $reason`r`nContent-Type: $ContentType`r`nContent-Length: $($Bytes.Length)`r`nAccess-Control-Allow-Origin: *`r`nAccess-Control-Allow-Headers: Content-Type`r`nAccess-Control-Allow-Methods: GET, OPTIONS`r`nCache-Control: no-store`r`nConnection: close`r`n`r`n"
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("HTTP/1.1 $Status $reason")
+    if ($ContentType) { $lines.Add("Content-Type: $ContentType") }
+    $lines.Add("Content-Length: $Length")
+    $lines.Add("Access-Control-Allow-Origin: http://localhost:$Port")
+    $lines.Add("Access-Control-Allow-Credentials: true")
+    $lines.Add("Access-Control-Allow-Headers: Content-Type")
+    $lines.Add("Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS")
+    $lines.Add("Cache-Control: no-store")
+    $lines.Add("Connection: close")
+    if ($ExtraHeaders) {
+        foreach ($key in $ExtraHeaders.Keys) {
+            $value = $ExtraHeaders[$key]
+            if ($value -is [array]) {
+                foreach ($item in $value) { $lines.Add("$key`: $item") }
+            } else {
+                $lines.Add("$key`: $value")
+            }
+        }
+    }
+    return (($lines -join "`r`n") + "`r`n`r`n")
+}
+
+function Send-Bytes($Client, $Status, $ContentType, [byte[]]$Bytes, $ExtraHeaders = $null) {
+    $stream = $Client.GetStream()
+    $headers = New-HeaderText $Status $ContentType $Bytes.Length $ExtraHeaders
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($headers)
     $stream.Write($headerBytes, 0, $headerBytes.Length)
     if ($Bytes.Length -gt 0) {
@@ -38,13 +67,13 @@ function Send-Bytes($Client, $Status, $ContentType, [byte[]]$Bytes) {
     }
 }
 
-function Send-Text($Client, $Status, $ContentType, $Text) {
+function Send-Text($Client, $Status, $ContentType, $Text, $ExtraHeaders = $null) {
     if ($null -eq $Text) { $Text = "" }
-    Send-Bytes $Client $Status $ContentType ([System.Text.Encoding]::UTF8.GetBytes($Text))
+    Send-Bytes $Client $Status $ContentType ([System.Text.Encoding]::UTF8.GetBytes($Text)) $ExtraHeaders
 }
 
-function Send-Json($Client, $Status, $Object) {
-    Send-Text $Client $Status "application/json; charset=utf-8" ($Object | ConvertTo-Json -Depth 20)
+function Send-Json($Client, $Status, $Object, $ExtraHeaders = $null) {
+    Send-Text $Client $Status "application/json; charset=utf-8" ($Object | ConvertTo-Json -Depth 40) $ExtraHeaders
 }
 
 function Find-HeaderEnd([byte[]]$Bytes) {
@@ -55,6 +84,20 @@ function Find-HeaderEnd([byte[]]$Bytes) {
         }
     }
     return -1
+}
+
+function Convert-Headers($HeaderText) {
+    $headers = @{}
+    $lines = $HeaderText -split "`r?`n"
+    for ($i = 1; $i -lt $lines.Length; $i++) {
+        $line = $lines[$i]
+        $idx = $line.IndexOf(":")
+        if ($idx -lt 1) { continue }
+        $name = $line.Substring(0, $idx).Trim().ToLowerInvariant()
+        $value = $line.Substring($idx + 1).Trim()
+        $headers[$name] = $value
+    }
+    return $headers
 }
 
 function Read-HttpRequest($Client) {
@@ -77,10 +120,72 @@ function Read-HttpRequest($Client) {
     $first = ($headerText -split "`r?`n")[0] -split " "
     if ($first.Length -lt 2) { throw "Invalid HTTP request line" }
 
+    $headers = Convert-Headers $headerText
+    $contentLength = 0
+    if ($headers.ContainsKey("content-length")) {
+        $contentLength = [int]$headers["content-length"]
+    }
+    $bodyStart = $headerEnd + 4
+    $alreadyRead = $all.Length - $bodyStart
+    while ($alreadyRead -lt $contentLength) {
+        $read = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, $contentLength - $alreadyRead))
+        if ($read -le 0) { break }
+        $memory.Write($buffer, 0, $read)
+        $alreadyRead += $read
+    }
+    $all = $memory.ToArray()
+    $body = ""
+    if ($contentLength -gt 0) {
+        $body = [System.Text.Encoding]::UTF8.GetString($all, $bodyStart, $contentLength)
+    }
+
     [pscustomobject]@{
         Method = $first[0].ToUpperInvariant()
         Path = $first[1]
+        Headers = $headers
+        BodyText = $body
     }
+}
+
+function Read-JsonBody($Request) {
+    if ([string]::IsNullOrWhiteSpace($Request.BodyText)) { return [pscustomobject]@{} }
+    try {
+        return ($Request.BodyText | ConvertFrom-Json)
+    } catch {
+        throw "JSON body is invalid."
+    }
+}
+
+function Get-CookieValue($Headers, $Name) {
+    if (-not $Headers.ContainsKey("cookie")) { return $null }
+    $cookies = $Headers["cookie"] -split ";"
+    foreach ($cookie in $cookies) {
+        $parts = $cookie.Trim() -split "=", 2
+        if ($parts.Length -eq 2 -and $parts[0] -eq $Name) {
+            return [System.Uri]::UnescapeDataString($parts[1])
+        }
+    }
+    return $null
+}
+
+function New-SessionCookie($Token) {
+    return "$SessionCookieName=$([System.Uri]::EscapeDataString($Token)); Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+}
+
+function New-ExpiredSessionCookie {
+    return "$SessionCookieName=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+}
+
+function Get-RequestSession($Request) {
+    $token = Get-CookieValue $Request.Headers $SessionCookieName
+    if (-not $token) { return $null }
+    return Get-DbSession $token
+}
+
+function Require-Session($Request) {
+    $session = Get-RequestSession $Request
+    if (-not $session) { throw "Login is required." }
+    return $session
 }
 
 function Get-MimeType($Path) {
@@ -102,6 +207,7 @@ function Send-StaticFile($Client, $RequestPath) {
     $pathOnly = ($RequestPath -split "\?")[0]
     $decoded = [System.Uri]::UnescapeDataString($pathOnly).TrimStart("/")
     if ([string]::IsNullOrWhiteSpace($decoded)) { $decoded = "index.html" }
+    if ($decoded.StartsWith("invite/")) { $decoded = "index.html" }
     $relative = $decoded.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
     $full = [System.IO.Path]::GetFullPath((Join-Path $ClientRoot $relative))
     if (-not $full.StartsWith($ClientRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -112,6 +218,92 @@ function Send-StaticFile($Client, $RequestPath) {
         $full = Join-Path $ClientRoot "index.html"
     }
     Send-Bytes $Client 200 (Get-MimeType $full) ([System.IO.File]::ReadAllBytes($full))
+}
+
+function Send-ApiError($Client, $Status, $Code, $Message) {
+    Send-Json $Client $Status @{ ok = $false; error = $Code; message = $Message }
+}
+
+function Handle-ApiRequest($Client, $Request, $PathOnly) {
+    if ($Request.Method -eq "OPTIONS") {
+        Send-Text $Client 204 "text/plain; charset=utf-8" ""
+        return
+    }
+
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/health") {
+        $health = Get-DbHealth
+        $health | Add-Member -NotePropertyName port -NotePropertyValue $Port -Force
+        Send-Json $Client 200 $health
+        return
+    }
+
+    if ($Request.Method -eq "POST" -and $PathOnly -eq "/api/auth/register-owner") {
+        $body = Read-JsonBody $Request
+        $result = Register-Owner $body
+        Send-Json $Client 201 @{ ok = $true; session = $result.session } @{ "Set-Cookie" = (New-SessionCookie $result.token) }
+        return
+    }
+
+    if ($Request.Method -eq "POST" -and $PathOnly -eq "/api/auth/login") {
+        $body = Read-JsonBody $Request
+        $accountId = if ($body.accountId) { $body.accountId } else { $body.id }
+        $result = Login-DbUser $accountId $body.password
+        Send-Json $Client 200 @{ ok = $true; session = $result.session } @{ "Set-Cookie" = (New-SessionCookie $result.token) }
+        return
+    }
+
+    if ($Request.Method -eq "POST" -and $PathOnly -eq "/api/auth/logout") {
+        $token = Get-CookieValue $Request.Headers $SessionCookieName
+        Clear-DbSession $token
+        Send-Json $Client 200 @{ ok = $true } @{ "Set-Cookie" = (New-ExpiredSessionCookie) }
+        return
+    }
+
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/session") {
+        $session = Get-RequestSession $Request
+        if ($session) {
+            Send-Json $Client 200 @{ authenticated = $true; session = $session }
+        } else {
+            Send-Json $Client 200 @{ authenticated = $false; session = $null }
+        }
+        return
+    }
+
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/state") {
+        $session = Require-Session $Request
+        Send-Json $Client 200 (Get-DbState $session.householdId)
+        return
+    }
+
+    if (($Request.Method -eq "PUT" -or $Request.Method -eq "POST") -and $PathOnly -eq "/api/state") {
+        $session = Require-Session $Request
+        $body = Read-JsonBody $Request
+        Send-Json $Client 200 (Set-DbState $body $session.householdId)
+        return
+    }
+
+    if ($Request.Method -eq "POST" -and $PathOnly -eq "/api/invites") {
+        $session = Require-Session $Request
+        $body = Read-JsonBody $Request
+        Send-Json $Client 201 @{ ok = $true; invitation = (New-DbInvitation $session $body) }
+        return
+    }
+
+    if ($PathOnly -match "^/api/invites/([^/]+)$") {
+        $inviteId = [System.Uri]::UnescapeDataString($matches[1])
+        if ($Request.Method -eq "GET") {
+            Send-Json $Client 200 @{ ok = $true; invitation = (Get-DbInvitationPreview $inviteId) }
+            return
+        }
+        if ($Request.Method -eq "POST") {
+            $body = Read-JsonBody $Request
+            $result = Accept-DbInvitation $inviteId $body
+            Send-Json $Client 200 @{ ok = $true; session = $result.session } @{ "Set-Cookie" = (New-SessionCookie $result.token) }
+            return
+        }
+    }
+
+    Send-ApiError $Client 404 "not_found" "API route not found."
 }
 
 function Get-LocalIPv4 {
@@ -125,33 +317,51 @@ $listener = New-Object System.Net.Sockets.TcpListener -ArgumentList ([System.Net
 $listener.Start()
 $ip = Get-LocalIPv4
 Write-Host ""
-Write-Host "ForHome static test server is running."
+Write-Host "ForHome PostgreSQL API server is running."
 Write-Host "PC:     http://localhost:$Port"
 Write-Host "Mobile: http://$ip`:$Port"
-Write-Host "Mode:   localhost uses local mock storage by default"
+Write-Host "DB:     PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD or data\db.env.ps1"
 Write-Host "Stop:   Ctrl + C"
 Write-Host ""
-Write-AppLog "static test server started on port $Port"
+Write-AppLog "postgresql api server started on port $Port"
 
 while ($true) {
     $client = $listener.AcceptTcpClient()
     try {
         $request = Read-HttpRequest $client
         $pathOnly = ($request.Path -split "\?")[0]
-        if ($request.Method -eq "OPTIONS") {
-            Send-Text $client 204 "text/plain; charset=utf-8" ""
-        } elseif ($request.Method -eq "GET" -and $pathOnly -eq "/api/health") {
-            Send-Json $client 200 @{ ok = $true; storage = "firebase-firestore"; mode = "static-test"; port = $Port }
-        } elseif ($pathOnly.StartsWith("/api/")) {
-            Send-Json $client 410 @{ error = "api_removed"; message = "Production storage uses Firebase Firestore." }
+        if ($pathOnly.StartsWith("/api/")) {
+            try {
+                Handle-ApiRequest $client $request $pathOnly
+            } catch {
+                $status = 500
+                $code = "server_error"
+                $message = "$_"
+                if ($message -match "Login is required") {
+                    $status = 401
+                    $code = "unauthorized"
+                } elseif ($message -match "permission") {
+                    $status = 403
+                    $code = "forbidden"
+                } elseif ($message -match "not found") {
+                    $status = 404
+                    $code = "not_found"
+                } elseif ($message -match "password|JSON body|required|invalid|expired|used|revoked") {
+                    $status = 400
+                    $code = "bad_request"
+                }
+                Send-ApiError $client $status $code $message
+            }
         } elseif ($request.Method -eq "GET") {
             Send-StaticFile $client $request.Path
+        } elseif ($request.Method -eq "OPTIONS") {
+            Send-Text $client 204 "text/plain; charset=utf-8" ""
         } else {
-            Send-Json $client 405 @{ error = "method_not_allowed" }
+            Send-ApiError $client 405 "method_not_allowed" "Method not allowed."
         }
     } catch {
         Write-AppLog "request failed: $_"
-        try { Send-Json $client 500 @{ error = "server_error"; message = "$_" } } catch {}
+        try { Send-ApiError $client 500 "server_error" "$_" } catch {}
     } finally {
         $client.Close()
     }

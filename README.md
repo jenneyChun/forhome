@@ -1,62 +1,128 @@
 # ForHome
 
-ForHome is a family chore web app deployed as a static Firebase Hosting app. Firebase Auth signs family members in, Cloud Firestore stores shared app data, and GitHub Actions writes dated JSON/Markdown backups.
+ForHome is a family chore, care, tomorrow-plan, and message web app. Production and persistent data live in PostgreSQL. The browser never connects to PostgreSQL directly; it calls the PowerShell API server in `server/server.ps1`.
 
 ## Folder Layout
 
-- `code/`: browser client code served by Firebase Hosting
-- `server/`: local PowerShell static server for Playwright and LAN smoke checks
-- `scripts/`: automation scripts such as Firestore backup export
-- `data/`: generated exports and backup output
+- `code/`: browser client code
+- `server/`: PowerShell static file, auth, session, and PostgreSQL API server
+- `server/sql/schema.sql`: normalized PostgreSQL schema
+- `scripts/`: PostgreSQL backup and automation scripts
+- `data/`: local DB config, generated exports, and backup output
 - `log/`: local runtime logs and Playwright reports
 - `tests/`: structure tests, fixtures, and Playwright E2E tests
-- `docs/`: requirements and Codex session notes
+- `docs/`: requirements, design notes, and Codex session notes
 
-## Firebase Setup
+## PostgreSQL Setup
 
-The default Firebase project is `forhome-19317`.
-
-Create these Firebase Auth email/password users:
-
-```text
-admin@forhome.local / admin1234
-mom@forhome.local / mom1234
-dad@forhome.local / dad1234
-son@forhome.local / son1234
-```
-
-Deploy Firestore rules and hosting with the Firebase CLI:
+PostgreSQL server and the `psql` client must be available. Provide connection settings through environment variables or `data/db.env.ps1`.
 
 ```powershell
-firebase deploy --only firestore:rules,hosting
+$env:PGHOST = "localhost"
+$env:PGPORT = "5432"
+$env:PGDATABASE = "forhome"
+$env:PGUSER = "postgres"
+$env:PGPASSWORD = "your-password"
 ```
 
-The first admin login seeds the shared Firestore document:
+When the server starts, `server/db.ps1` applies `server/sql/schema.sql` and prepares seed data and default local accounts.
+
+Default local accounts:
 
 ```text
-families/forhome/state/app
+admin / admin1234
+mom / mom1234
+dad / dad1234
+son / son1234
 ```
+
+Passwords are stored as `pbkdf2_sha256$iterations$salt$hash`. Browser sessions use an `httpOnly` cookie, while PostgreSQL stores only the session token hash.
+
+## Local Server
+
+For local development and Playwright checks, run:
+
+```bash
+npm run dev:local
+```
+
+If Node/npm is not installed, start the same server directly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1 -Port 8080
+```
+
+Then open:
+
+- PC: `http://localhost:8080`
+- Mobile: use the LAN URL printed by the server window
+
+The server provides static files and API routes:
+
+```text
+GET  /api/health
+POST /api/auth/register-owner
+POST /api/auth/login
+POST /api/auth/logout
+GET  /api/session
+GET  /api/state
+PUT  /api/state
+POST /api/invites
+GET  /api/invites/:id
+POST /api/invites/:id
+```
+
+## Mobile Layout
+
+The dedicated mobile layout is enabled on an `m.` host. In production, connect `https://m.<domain>` to the same API server or reverse proxy. When a mobile device opens the regular web address, the app redirects to `https://m.<current-domain>`.
+
+For local checks, use the query string instead of a separate `m.` domain:
+
+```text
+http://localhost:8080/?surface=mobile
+http://localhost:8080/?surface=web
+```
+
+Use browser mock storage only for Playwright or local UI tests:
+
+```text
+http://localhost:8080/?storage=test
+```
+
+## Invitation-Based Signup
+
+The first registrant creates a household as the `owner` representative hero. That person can invite others with an invite URL, QR payload, or short invite code. Invitees join as either a `hero` or `care_member`.
+
+See `docs/auth-invitation-flow.ko.md` and `docs/postgresql-transition-plan.ko.md` for details.
 
 ## GitHub Backup
 
-The workflow `.github/workflows/firestore-backup.yml` runs daily at `15:10 UTC`, which is `00:10 KST`, and writes:
+The workflow `.github/workflows/postgresql-backup.yml` runs daily at `15:10 UTC`, which is `00:10 KST`, and writes:
 
 ```text
 data/backups/YYYY-MM-DD/state.json
 reports/daily/YYYY-MM-DD.md
 ```
 
-Add this repository secret before enabling the workflow:
+Add PostgreSQL connection secrets before enabling the workflow:
 
 ```text
-FIREBASE_SERVICE_ACCOUNT_JSON
+PGHOST
+PGPORT
+PGDATABASE
+PGUSER
+PGPASSWORD
 ```
 
-The value must be a Firebase service account JSON with permission to read Firestore.
+Local dry-run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\postgresql-backup.ps1 -Fixture tests\fixtures\backup-state.json -Date 2026-06-03 -OutDir log\backup-dry-run
+```
 
 ## Morning Briefing
 
-The local Windows scheduler can send the 07:00 KST ForHome briefing to mom and dad through Kakao memo-to-me.
+The local Windows scheduler can send the 07:00 KST ForHome briefing through Kakao memo-to-me.
 
 Copy and fill these local-only files:
 
@@ -71,43 +137,40 @@ Then register the scheduled task from an elevated PowerShell window:
 powershell -NoProfile -ExecutionPolicy Bypass -File server\setup_scheduler.ps1
 ```
 
-## Local Test Server
+## When `npm` Is Not Recognized
 
-For local development and Playwright checks, run:
+If PowerShell prints `npm : The term 'npm' is not recognized as the name of a cmdlet, function, script file, or operable program`, Node.js/npm is not installed or is not on PATH.
 
-```bash
-npm run dev:local
+If you only need the local server, start the server script directly without npm:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1 -Port 8080
 ```
 
-Then open:
-
-- PC: `http://localhost:8080`
-- Mobile: use the LAN URL printed by the server window
-
-Localhost automatically uses a browser localStorage mock and does not call Firebase. You can also force modes explicitly:
-
-```text
-http://localhost:8080/?storage=test
-http://localhost:8080/?storage=firebase
-```
-
-`npm run dev` is an alias for the same local server.
-
-If Node/npm is not installed, the same server can still be started directly:
+You can also use the batch file:
 
 ```powershell
 server\start_server.bat
 ```
 
+To keep using `npm run dev:local`, install Node.js LTS, open a new PowerShell window, and verify npm:
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+node -v
+npm -v
+npm run dev:local
+```
+
 ## Tests
 
-Run structure and dry-run backup checks:
+Run structure and PostgreSQL backup dry-run checks:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
 ```
 
-Run Playwright E2E after installing Node dependencies and browser binaries:
+Run Playwright E2E after installing Node dependencies and browser binaries. E2E can use `?storage=test` or the Playwright flag for browser mock storage.
 
 ```powershell
 npm install

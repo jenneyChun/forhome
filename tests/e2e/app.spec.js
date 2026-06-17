@@ -1,7 +1,8 @@
 const { test, expect } = require('@playwright/test');
 
 async function login(page, id = 'admin', password = 'admin1234', path = '/') {
-  await page.goto(path);
+  const separator = path.includes('?') ? '&' : '?';
+  await page.goto(`${path}${separator}storage=test`);
   await page.getByTestId('login-id').fill(id);
   await page.getByTestId('login-password').fill(password);
   await page.getByTestId('login-submit').click();

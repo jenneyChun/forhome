@@ -1,0 +1,49 @@
+name: PostgreSQL daily backup
+
+on:
+  schedule:
+    - cron: '10 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: windows-latest
+    env:
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PostgreSQL client
+        shell: powershell
+        run: |
+          if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+            choco install postgresql16 --no-progress -y
+            $env:Path += ";C:\Program Files\PostgreSQL\16\bin"
+          }
+          psql --version
+
+      - name: Write PostgreSQL backup
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\postgresql-backup.ps1
+
+      - name: Commit backup files
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/backups reports/daily
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No backup changes to commit."
+          } else {
+            git commit -m "chore: add PostgreSQL daily backup"
+            git push
+          }

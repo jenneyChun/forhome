@@ -174,7 +174,7 @@ $lines.Add("")
 $lines.Add("Codex follow-up commands")
 $lines.Add("Codex implement: <request>")
 $lines.Add("Codex verify: npm run test:e2e")
-$lines.Add("Codex deploy: firebase deploy --only firestore:rules,hosting")
+$lines.Add("Codex run server: powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1 -Port 8080")
 $lines.Add("")
 $lines.Add("Note: Kakao message replies are not auto-read until a Kakao Channel webhook bridge is connected.")
 

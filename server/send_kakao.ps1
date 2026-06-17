@@ -9,18 +9,18 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir ".."))
 $envFile = Join-Path $scriptDir "briefing.env.ps1"
 $recipientFile = Join-Path $scriptDir "kakao-recipients.json"
 $briefingFile = Join-Path $repoRoot "data\exports\morning_briefing.json"
-$briefingScript = Join-Path $repoRoot "scripts\firestore-backup.js"
+$briefingScript = Join-Path $repoRoot "scripts\postgresql-backup.ps1"
 
 if (Test-Path $envFile) {
     . $envFile
 }
 
-function Assert-Node {
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node) {
-        throw "Node.js was not found. Install Node or run npm install before scheduling the briefing."
+function Assert-PowerShell {
+    $powershell = Get-Command powershell -ErrorAction SilentlyContinue
+    if (-not $powershell) {
+        throw "PowerShell was not found. The PostgreSQL briefing exporter requires PowerShell."
     }
-    return $node.Source
+    return $powershell.Source
 }
 
 function Read-Recipients {
@@ -33,15 +33,15 @@ function Read-Recipients {
 }
 
 function New-BriefingFile {
-    $node = Assert-Node
-    $args = @($briefingScript, "--briefing", "--out-file", $briefingFile)
+    $powershell = Assert-PowerShell
+    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $briefingScript, "-Briefing", "-OutFile", $briefingFile)
     if ($env:BRIEFING_DATE) {
-        $args += @("--date", $env:BRIEFING_DATE)
+        $args += @("-Date", $env:BRIEFING_DATE)
     }
-    if ($env:FIRESTORE_BRIEFING_FIXTURE) {
-        $args += @("--fixture", $env:FIRESTORE_BRIEFING_FIXTURE)
+    if ($env:POSTGRES_BRIEFING_FIXTURE) {
+        $args += @("-Fixture", $env:POSTGRES_BRIEFING_FIXTURE)
     }
-    & $node @args
+    & $powershell @args
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to build the ForHome briefing."
     }

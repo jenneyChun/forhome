@@ -3,6 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const forcedSurface = params.get('surface');
+      const hasForcedSurface = forcedSurface === 'mobile' || forcedSurface === 'web';
+      const host = location.hostname.toLowerCase();
+      const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+      const isLocalHost = localHosts.has(host)
+        || host.endsWith('.local')
+        || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)
+        || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host);
+      const isMobileHost = host.startsWith('m.');
+      const coarseSmallScreen = typeof matchMedia === 'function'
+        && matchMedia('(max-width: 820px) and (pointer: coarse)').matches;
+      const mobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (!hasForcedSurface && !isMobileHost && !isLocalHost && (coarseSmallScreen || mobileUserAgent)) {
+        const next = new URL(location.href);
+        next.protocol = 'https:';
+        next.hostname = host.startsWith('www.') ? `m.${host.slice(4)}` : `m.${host}`;
+        location.replace(next.toString());
+        return;
+      }
+      document.documentElement.dataset.surface = forcedSurface === 'mobile' || (!hasForcedSurface && isMobileHost)
+        ? 'mobile'
+        : 'web';
+    })();
+  </script>
   <title>우리집 히어로</title>
   <style>
     :root {
@@ -525,33 +553,176 @@
     .dialog-emoji { font-size: 34px; font-weight: 900; margin-bottom: 8px; }
     .dialog h2 { margin: 0 0 8px; font-size: 20px; }
     .dialog p { margin: 0 0 14px; color: var(--muted); line-height: 1.55; }
-    @media (max-width: 820px) {
-      .topbar-inner { padding: 10px 12px; }
-      .status-line { max-width: 42vw; }
-      .layout { grid-template-columns: 1fr; padding: 12px; padding-bottom: 86px; }
-      .tabbar {
-        position: fixed;
+    html[data-surface="mobile"] body {
+      background:
+        linear-gradient(180deg, #fff7ed 0%, #fffdf8 34%, #f8fafc 100%);
+      overflow-x: hidden;
+    }
+    html[data-surface="mobile"] .login-screen {
+      align-items: start;
+      justify-items: center;
+      padding: 18px 12px;
+    }
+    html[data-surface="mobile"] .login-box,
+    html[data-surface="mobile"] .topbar-inner,
+    html[data-surface="mobile"] .layout {
+      max-width: 460px;
+    }
+    html[data-surface="mobile"] .login-box {
+      width: min(100%, 380px);
+      margin-top: 18px;
+      padding: 20px;
+    }
+    html[data-surface="mobile"] .topbar {
+      background: rgba(255, 250, 243, .98);
+      box-shadow: 0 6px 18px rgba(105, 71, 31, .08);
+    }
+    html[data-surface="mobile"] .topbar-inner {
+      padding: 10px 12px;
+    }
+    html[data-surface="mobile"] .app-title strong {
+      font-size: 15px;
+    }
+    html[data-surface="mobile"] .status-line {
+      max-width: 42vw;
+    }
+    html[data-surface="mobile"] .layout {
+      grid-template-columns: 1fr;
+      padding: 10px 10px 96px;
+      gap: 10px;
+    }
+    html[data-surface="mobile"] .tabbar {
+      position: fixed;
+      left: 50%;
+      right: auto;
+      bottom: 0;
+      top: auto;
+      z-index: 25;
+      width: min(100%, 460px);
+      transform: translateX(-50%);
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      padding: 6px 6px calc(8px + env(safe-area-inset-bottom));
+      background: rgba(255, 255, 255, .97);
+      border-top: 1px solid var(--line);
+      box-shadow: 0 -10px 24px rgba(105, 71, 31, .08);
+      backdrop-filter: blur(12px);
+    }
+    html[data-surface="mobile"] .tab-btn {
+      height: 52px;
+      border-color: transparent;
+      background: transparent;
+      display: grid;
+      place-items: center;
+      gap: 2px;
+      padding: 4px;
+      font-size: 11px;
+    }
+    html[data-surface="mobile"] .tab-btn.active {
+      border-color: transparent;
+      background: var(--blue-soft);
+      box-shadow: inset 0 0 0 1px rgba(217, 119, 6, .24);
+    }
+    html[data-surface="mobile"] .grid {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    html[data-surface="mobile"] .span-4,
+    html[data-surface="mobile"] .span-5,
+    html[data-surface="mobile"] .span-6,
+    html[data-surface="mobile"] .span-7,
+    html[data-surface="mobile"] .span-8,
+    html[data-surface="mobile"] .span-12 {
+      grid-column: 1;
+    }
+    html[data-surface="mobile"] .screen-hero {
+      grid-column: 1;
+      padding: 14px;
+    }
+    html[data-surface="mobile"] .screen-hero h2 {
+      font-size: 20px;
+    }
+    html[data-surface="mobile"] .screen-hero p {
+      font-size: 13px;
+    }
+    html[data-surface="mobile"] .panel {
+      padding: 12px;
+      box-shadow: 0 4px 14px rgba(105, 71, 31, .05);
+    }
+    html[data-surface="mobile"] .panel-head {
+      align-items: flex-start;
+    }
+    html[data-surface="mobile"] .metric-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scroll-snap-type: x proximity;
+    }
+    html[data-surface="mobile"] .metric-row > * {
+      min-width: 132px;
+      scroll-snap-align: start;
+    }
+    html[data-surface="mobile"] .selector-grid {
+      grid-template-columns: none;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(144px, 72%);
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scroll-snap-type: x proximity;
+    }
+    html[data-surface="mobile"] .select-card {
+      scroll-snap-align: start;
+    }
+    html[data-surface="mobile"] .form-grid {
+      grid-template-columns: 1fr;
+    }
+    html[data-surface="mobile"] .col-2,
+    html[data-surface="mobile"] .col-3,
+    html[data-surface="mobile"] .col-4,
+    html[data-surface="mobile"] .col-5,
+    html[data-surface="mobile"] .col-6,
+    html[data-surface="mobile"] .col-12 {
+      grid-column: 1;
+    }
+    html[data-surface="mobile"] .day {
+      min-height: 58px;
+      padding: 5px;
+      font-size: 12px;
+    }
+    html[data-surface="mobile"] .photo-cell {
+      width: 72px;
+      height: 58px;
+    }
+    html[data-surface="mobile"] .user-pill {
+      max-width: 104px;
+    }
+    html[data-surface="mobile"] .account-row,
+    html[data-surface="mobile"] .rank-row,
+    html[data-surface="mobile"] .member-row {
+      align-items: flex-start;
+    }
+    html[data-surface="mobile"] .review-actions .btn {
+      flex: 1 1 140px;
+    }
+    @media (max-width: 640px) {
+      html[data-surface="mobile"] .login-screen {
+        justify-items: stretch;
+      }
+      html[data-surface="mobile"] .login-box,
+      html[data-surface="mobile"] .topbar-inner,
+      html[data-surface="mobile"] .layout {
+        max-width: none;
+      }
+      html[data-surface="mobile"] .login-box {
+        width: 100%;
+      }
+      html[data-surface="mobile"] .tabbar {
         left: 0;
         right: 0;
-        bottom: 0;
-        top: auto;
-        z-index: 25;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 0;
-        padding: 6px 6px 8px;
-        background: rgba(255, 255, 255, .96);
-        border-top: 1px solid var(--line);
-        backdrop-filter: blur(12px);
+        width: 100%;
+        transform: none;
       }
-      .tab-btn { height: 50px; border-color: transparent; background: transparent; display: grid; place-items: center; gap: 2px; padding: 4px; font-size: 11px; }
-      .grid { gap: 10px; }
-      .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 12; }
-      .metric-row { grid-template-columns: 1fr 1fr; }
-      .day { min-height: 58px; padding: 5px; }
-      .photo-cell { width: 72px; height: 58px; }
-      .user-pill { max-width: 110px; }
-      .form-grid { grid-template-columns: 1fr; }
-      .col-2, .col-3, .col-4, .col-5, .col-6, .col-12 { grid-column: 1; }
     }
   </style>
 </head>
@@ -625,25 +796,14 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const FIREBASE_CONFIG = {
-      apiKey: 'AIzaSyCExIizXG3OitWMXBElM7RDMqT6jTKS-xE',
-      authDomain: 'forhome-19317.firebaseapp.com',
-      projectId: 'forhome-19317',
-      storageBucket: 'forhome-19317.firebasestorage.app',
-      messagingSenderId: '598577686461',
-      appId: '1:598577686461:web:248472a3ce70800f4354d4'
-    };
-    const FIRESTORE_FAMILY_ID = 'forhome';
-    const FIRESTORE_STATE_PATH = `families/${FIRESTORE_FAMILY_ID}/state/app`;
-    const AUTH_EMAIL_DOMAIN = 'forhome.local';
     const SESSION_KEY = 'forhome-session-v1';
     const TEST_STORAGE_KEY = 'forhome-test-state-v1';
     const URL_PARAMS = new URLSearchParams(location.search);
     const STORAGE_MODE = URL_PARAMS.get('storage');
+    const SURFACE_MODE = document.documentElement.dataset.surface || 'web';
     const FORCED_NOW = URL_PARAMS.get('now');
-    const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
     const TEST_MODE = STORAGE_MODE === 'test'
-      || (!STORAGE_MODE && isLocalTestHost(location.hostname))
+      || STORAGE_MODE === 'mock'
       || window.__FORHOME_TEST__ === true;
     const PARENT_IDS = ['mom', 'dad'];
     const BRIEFING_HOUR = 7;
@@ -703,16 +863,6 @@
       return { id, name, emoji, points, xp: points * 10 };
     }
 
-    function isLocalTestHost(hostname) {
-      const host = String(hostname || '').toLowerCase();
-      if (LOCAL_HOSTS.has(host)) return true;
-      if (host.endsWith('.local')) return true;
-      if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-      if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-      if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-      return false;
-    }
-
     let state = defaultState();
     let session = null;
     let activeTab = 'home';
@@ -738,27 +888,7 @@
     document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
     function createStorageProvider() {
-      return TEST_MODE ? createTestStorageProvider() : createFirebaseStorageProvider();
-    }
-
-    function authEmailFor(accountId) {
-      return `${String(accountId || '').trim().toLowerCase()}@${AUTH_EMAIL_DOMAIN}`;
-    }
-
-    function accountIdFromEmail(email) {
-      const lower = String(email || '').trim().toLowerCase();
-      const suffix = `@${AUTH_EMAIL_DOMAIN}`;
-      return lower.endsWith(suffix) ? lower.slice(0, -suffix.length) : lower;
-    }
-
-    function accountTemplate(accountId) {
-      const id = String(accountId || '').trim();
-      return (state.accounts || []).find(a => a.id === id) || defaultState().accounts.find(a => a.id === id);
-    }
-
-    function sessionForAccountId(accountId) {
-      const acc = accountTemplate(accountId);
-      return acc ? { accountId: acc.id, memberId: acc.memberId, isAdmin: !!acc.isAdmin } : null;
+      return TEST_MODE ? createTestStorageProvider() : createPostgresApiProvider();
     }
 
     function createTestStorageProvider() {
@@ -809,92 +939,75 @@
       };
     }
 
-    function loadScript(src) {
-      return new Promise((resolve, reject) => {
-        const existing = document.querySelector(`script[src="${src}"]`);
-        if (existing) {
-          existing.addEventListener('load', resolve, { once: true });
-          existing.addEventListener('error', reject, { once: true });
-          if (existing.dataset.loaded === 'true') resolve();
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = src;
-        script.onload = () => {
-          script.dataset.loaded = 'true';
-          resolve();
-        };
-        script.onerror = () => reject(new Error(`Failed to load ${src}`));
-        document.head.appendChild(script);
-      });
+    async function apiJson(path, options = {}) {
+      const init = {
+        method: options.method || 'GET',
+        credentials: 'same-origin',
+        headers: {}
+      };
+      if (options.body !== undefined) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(options.body);
+      }
+      const response = await fetch(path, init);
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) {
+        const err = new Error(data.message || data.error || `API error ${response.status}`);
+        err.status = response.status;
+        err.payload = data;
+        throw err;
+      }
+      return data;
     }
 
-    async function loadFirebaseSdk() {
-      if (window.firebase?.auth && window.firebase?.firestore) return;
-      const base = 'https://www.gstatic.com/firebasejs/10.14.1';
-      await loadScript(`${base}/firebase-app-compat.js`);
-      await loadScript(`${base}/firebase-auth-compat.js`);
-      await loadScript(`${base}/firebase-firestore-compat.js`);
-    }
-
-    function createFirebaseStorageProvider() {
-      let auth = null;
-      let db = null;
-      let stateRef = null;
+    function createPostgresApiProvider() {
+      let currentSession = null;
       return {
-        mode: 'firebase',
-        label: 'Firebase Firestore',
+        mode: 'postgresql',
+        label: 'PostgreSQL API',
         async initialize() {
-          await loadFirebaseSdk();
-          if (!window.firebase) throw new Error('Firebase SDK failed to load.');
-          if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-          auth = firebase.auth();
-          db = firebase.firestore();
-          stateRef = db.doc(FIRESTORE_STATE_PATH);
-          await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-          await new Promise((resolve) => {
-            const unsubscribe = auth.onAuthStateChanged(() => {
-              unsubscribe();
-              resolve();
-            });
-          });
+          const result = await apiJson('/api/session');
+          currentSession = result.authenticated ? result.session : null;
         },
         getCurrentSession() {
-          const accountId = accountIdFromEmail(auth?.currentUser?.email);
-          return accountId ? sessionForAccountId(accountId) : null;
+          return currentSession;
         },
         async login(accountId, password) {
-          await auth.signInWithEmailAndPassword(authEmailFor(accountId), password);
-          const sessionData = sessionForAccountId(accountId);
-          if (!sessionData) throw new Error('This Firebase account is not mapped to a ForHome account.');
-          return sessionData;
+          const result = await apiJson('/api/auth/login', { method: 'POST', body: { accountId, password } });
+          currentSession = result.session;
+          return currentSession;
         },
         async logout() {
-          if (auth?.currentUser) await auth.signOut();
-        },
-        async loadState(options = {}) {
-          const snap = await stateRef.get();
-          if (snap.exists) return snap.data();
-          if (!options.seedIfMissing) {
-            throw new Error('Firestore state is not initialized. Log in as admin first.');
+          try {
+            await apiJson('/api/auth/logout', { method: 'POST' });
+          } finally {
+            currentSession = null;
           }
-          const seeded = { ...defaultState(), version: 1, updatedAt: new Date().toISOString() };
-          await stateRef.set(seeded);
-          return seeded;
+        },
+        async loadState() {
+          return apiJson('/api/state');
         },
         async saveState(next) {
-          const saved = { ...next, version: Number(next.version || 0) + 1, updatedAt: new Date().toISOString() };
-          await stateRef.set(saved);
-          return saved;
+          return apiJson('/api/state', { method: 'PUT', body: next });
         },
         subscribeState(onState) {
-          return stateRef.onSnapshot(
-            (snap) => { if (snap.exists) onState(snap.data()); },
-            (err) => setStatus(`Firestore listen failed: ${err.message}`)
-          );
+          let stopped = false;
+          const timer = setInterval(async () => {
+            if (stopped) return;
+            try {
+              onState(await this.loadState());
+            } catch (err) {
+              setStatus(`동기화 확인 실패: ${err.message}`);
+            }
+          }, 5000);
+          return () => {
+            stopped = true;
+            clearInterval(timer);
+          };
         },
         getCurrentAccountId() {
-          return accountIdFromEmail(auth?.currentUser?.email);
+          return currentSession?.accountId || null;
         }
       };
     }
@@ -1020,11 +1133,6 @@
     async function doLogin() {
       const id = $('loginId').value.trim();
       const pw = $('loginPw').value;
-      const acc = accountTemplate(id);
-      if (!acc) {
-        $('loginError').textContent = '아이디와 비밀번호를 확인해 주세요.';
-        return;
-      }
       $('loginButton').disabled = true;
       $('loginError').textContent = '';
       try {
@@ -1238,7 +1346,12 @@
     }
 
     function messageOptions() { return `<option value="">전체</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
-    function memberRole(m) { return m?.role || (m?.id === 'son' ? 'child' : 'adult'); }
+    function memberRole(m) {
+      const role = m?.role || (m?.id === 'son' ? 'child' : 'adult');
+      if (role === 'owner' || role === 'hero') return 'adult';
+      if (role === 'care_member') return 'child';
+      return role;
+    }
     function adultMembers() { return state.members.filter(m => memberRole(m) === 'adult'); }
     function childMembers() { return state.members.filter(m => memberRole(m) === 'child'); }
     function isAdultMember(id) { return adultMembers().some(m => m.id === id); }
@@ -1323,7 +1436,10 @@
     function clamp(n, min, max) { return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min)); }
     function softColor(color = '#2563eb') { return `${color}18`; }
     function randomColor() { return ['#2563eb', '#0f9f8f', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'][Math.floor(Math.random() * 6)]; }
-    function setStatus(text) { $('syncStatus').textContent = `${text} / ${storageProvider?.label || '시작 중'}`; }
+    function setStatus(text) {
+      const surface = SURFACE_MODE === 'mobile' ? '모바일' : '웹';
+      $('syncStatus').textContent = `${surface} / ${text} / ${storageProvider?.label || '시작 중'}`;
+    }
     function toast(text) {
       const el = $('toast');
       el.textContent = text;

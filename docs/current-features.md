@@ -1,100 +1,71 @@
 # Current Features
 
-## 인증 및 세션
+## Login And Session
 
-### 코드에서 확인된 내용
+- Login is handled by `POST /api/auth/login`.
+- Accounts are stored in PostgreSQL `users`.
+- Passwords are stored as PBKDF2-SHA256 hashes.
+- The server issues an `httpOnly` `forhome_session` cookie.
+- PostgreSQL stores only the session token hash in `sessions`.
+- `GET /api/session` restores the browser session after reload.
 
-- Firebase Auth 기반 로그인 흐름이 있다.
-- 기본 계정은 `admin`, `mom`, `dad`, `son`이다.
-- Firebase Auth 이메일은 `admin@forhome.local`, `mom@forhome.local`, `dad@forhome.local`, `son@forhome.local` 형식을 사용한다.
-- 로컬 테스트 모드에서는 Firebase Auth 대신 `localStorage` 기반 mock 로그인을 사용한다.
-- 세션 정보는 브라우저 저장소에 보관된다.
+Default local accounts:
 
-### 추정한 내용
+```text
+admin / admin1234
+mom / mom1234
+dad / dad1234
+son / son1234
+```
 
-- 운영 환경에서는 Firebase Auth 사용자를 Firebase Console 또는 관리 도구에서 미리 생성해야 한다.
+## Household Signup And Invitations
 
-## 집안일 기록
+- `POST /api/auth/register-owner` creates a first account, household, and owner membership.
+- `POST /api/invites` creates an invitation for the current household.
+- `GET /api/invites/:id` previews an invitation.
+- `POST /api/invites/:id` accepts an invitation and creates the invited account/member.
+- Invite URL tokens and short codes are returned once to the creator/acceptor flow; PostgreSQL stores only hashes.
 
-### 코드에서 확인된 내용
+Roles:
 
-- 구성원과 집안일을 선택해 완료 기록을 생성할 수 있다.
-- 완료 기록에는 구성원, 집안일, 카테고리, 피로도, XP, 시간, 증빙 정보가 저장된다.
-- 완료 기록은 기본적으로 `pending` 승인 상태로 생성된다.
-- 승인된 기록만 구성원의 완료 수, 피로도, XP, 스티커 집계에 반영된다.
-- 주간 피로도가 설정 임계값 이상이면 휴식 상태로 표시하는 로직이 있다.
+| Role | Display |
+| --- | --- |
+| `owner` | Representative hero |
+| `hero` | Home hero |
+| `care_member` | Care member |
 
-## 증빙 업로드
+## App Data
 
-### 코드에서 확인된 내용
+The UI still works through a single compatible app-state object, but server-side persistence is normalized in PostgreSQL.
 
-- 집안일 완료 시 사진 파일을 선택할 수 있다.
-- 선택한 이미지는 브라우저에서 리사이즈되고 JPEG data URL로 저장된다.
-- 사진 없이 메모만 남길 수도 있다.
-- 증빙에는 파일명, 사진 분석 문구, 메모가 함께 저장된다.
+Current state areas:
 
-### 추정한 내용
+- household settings
+- members and account mapping
+- chores
+- task history
+- approval requests
+- proof captions/images
+- tomorrow plans
+- care assignments
+- care sessions
+- messages
+- badge history
+- change requests
 
-- 현재 사진은 별도 Storage에 업로드되지 않고 Firestore 상태 문서 안에 문자열로 들어가는 구조로 보인다.
+## Mobile Layout
 
-## 승인 및 검토
+- The mobile surface is enabled on an `m.` host.
+- Local checks can use `?surface=mobile`.
+- Playwright/local UI checks can use `?storage=test` for browser mock storage.
 
-### 코드에서 확인된 내용
+## Backup And Briefing
 
-- 엄마의 작업은 아빠가 승인한다.
-- 아빠의 작업은 엄마가 승인한다.
-- `child` 카테고리 작업은 엄마와 아빠 모두의 승인이 필요하다.
-- 승인자는 완료 기록을 승인하거나 반려할 수 있다.
-- 반려 시 사유 또는 메모를 남기는 흐름이 있다.
-- 승인 요청은 `approvalRequests` 배열로 관리된다.
+- `scripts/postgresql-backup.ps1` writes dated JSON and Markdown reports.
+- `.github/workflows/postgresql-backup.yml` runs the PostgreSQL backup on a daily schedule.
+- `server/send_kakao.ps1` uses the PostgreSQL backup script's briefing output.
 
-## 내일 할 일
+## Tests
 
-### 코드에서 확인된 내용
-
-- 사용자가 다른 가족 구성원에게 특정 날짜의 할 일을 요청할 수 있다.
-- 요청 상태는 `pending`, `accepted`, `declined`로 관리된다.
-- 거절 시 거절 이유를 저장한다.
-- 수락된 요청은 해당 날짜의 할 일로 표시된다.
-
-## 육아 담당 및 시간 기록
-
-### 코드에서 확인된 내용
-
-- 날짜별 아침 담당자와 저녁 담당자를 저장할 수 있다.
-- 엄마와 아빠의 육아 시간 세션을 시작 시간, 종료 시간, 메모와 함께 기록할 수 있다.
-- 기록된 분 단위 시간이 화면에서 합산된다.
-
-## 뱃지 및 랭킹
-
-### 코드에서 확인된 내용
-
-- 첫 작업, 5개 작업, 10개 작업, 100 XP, 피로도 20, 메시지 전송 같은 뱃지 조건이 있다.
-- 승인된 주간 기록을 기준으로 뱃지를 부여한다.
-- 주간 집안일 수, 피로도, XP를 기반으로 구성원 현황을 보여준다.
-
-## 메시지
-
-### 코드에서 확인된 내용
-
-- 가족 메시지를 작성하고 저장할 수 있다.
-- 전체 또는 특정 구성원에게 보낼 수 있는 구조다.
-- 집안일 승인 요청이나 내일 할 일 요청 시 메시지가 자동 생성된다.
-
-## 브리핑 및 요약
-
-### 코드에서 확인된 내용
-
-- 오전 7시 이후 화면에 아침 브리핑 패널을 보여주는 로직이 있다.
-- 브리핑에는 전날 작업, 전날 육아 시간, 오늘 육아 담당, 오늘 수락된 할 일, 대기 중인 요청이 포함된다.
-- 일일 요약을 생성해 브라우저 `localStorage`에 저장하는 기능이 있다.
-- `scripts/firestore-backup.js`는 일일 Markdown 보고서와 JSON 백업을 생성한다.
-
-## 자동화
-
-### 코드에서 확인된 내용
-
-- GitHub Actions는 매일 `15:10 UTC`, 즉 KST 기준 00:10에 Firestore 백업을 실행한다.
-- Windows 작업 스케줄러는 매일 07:00에 Kakao 브리핑 스크립트를 실행하도록 등록할 수 있다.
-- Codex/GitHub 업데이트를 Kakao로 보내는 스크립트가 있다.
-
+- `tests/run-tests.ps1` checks the PostgreSQL server/API structure, schema, docs, and fixture backup output.
+- Playwright E2E keeps using mock browser storage so UI flows can run without a live DB.
