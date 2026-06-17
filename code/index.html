@@ -6,26 +6,32 @@
   <title>우리집 히어로</title>
   <style>
     :root {
-      --bg: #f5f7fb;
+      --bg: #fff8ef;
       --panel: #fff;
-      --line: #dbe3ef;
-      --text: #172033;
-      --muted: #687386;
-      --blue: #2563eb;
-      --blue-soft: #e9f0ff;
-      --teal: #0f9f8f;
-      --teal-soft: #e5f7f3;
+      --line: #eadfce;
+      --text: #2f2418;
+      --muted: #7a6a58;
+      --blue: #d97706;
+      --blue-soft: #fff3d7;
+      --teal: #15803d;
+      --teal-soft: #eaf7df;
       --amber: #f59e0b;
       --amber-soft: #fff3d7;
-      --red: #ef4444;
-      --red-soft: #ffe8e8;
-      --shadow: 0 8px 24px rgba(23, 32, 51, .08);
+      --red: #dc2626;
+      --red-soft: #fee2e2;
+      --cream: #fffaf3;
+      --peach: #ffe7c2;
+      --mint: #dcfce7;
+      --rose: #ffe4e6;
+      --shadow: 0 10px 28px rgba(105, 71, 31, .12);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at top left, rgba(255, 231, 194, .7), transparent 34%),
+        linear-gradient(180deg, #fff8ef 0%, #fffdf8 44%, #f7fbf0 100%);
       color: var(--text);
       font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
       letter-spacing: 0;
@@ -40,15 +46,15 @@
       place-items: center;
       padding: 24px;
       background:
-        linear-gradient(120deg, rgba(37, 99, 235, .12), transparent 38%),
-        linear-gradient(260deg, rgba(15, 159, 143, .16), transparent 42%),
+        linear-gradient(120deg, rgba(251, 191, 36, .22), transparent 38%),
+        linear-gradient(260deg, rgba(34, 197, 94, .16), transparent 42%),
         var(--bg);
     }
     .login-box, .panel {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(23, 32, 51, .04);
+      box-shadow: 0 2px 10px rgba(105, 71, 31, .05);
     }
     .login-box {
       width: min(100%, 380px);
@@ -96,7 +102,7 @@
       position: sticky;
       top: 0;
       z-index: 20;
-      background: rgba(255, 255, 255, .94);
+      background: rgba(255, 250, 243, .94);
       border-bottom: 1px solid var(--line);
       backdrop-filter: blur(12px);
     }
@@ -127,7 +133,7 @@
     .user-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .user-pill {
       border: 1px solid var(--line);
-      background: #fff;
+      background: #fffdf8;
       border-radius: 999px;
       padding: 7px 10px;
       color: var(--text);
@@ -258,7 +264,7 @@
     .tag.red { color: var(--red); background: var(--red-soft); }
     .tag.gray { color: var(--muted); background: #eef2f7; }
     .btn {
-      min-height: 38px;
+      min-height: 44px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
@@ -274,6 +280,12 @@
     .btn.danger { border-color: #fecaca; background: var(--red-soft); color: var(--red); }
     .btn.icon { width: 38px; padding: 0; flex: 0 0 auto; }
     .btn.full { width: 100%; }
+    .btn.kid {
+      min-height: 58px;
+      font-size: 16px;
+      border-radius: 8px;
+      box-shadow: 0 8px 18px rgba(217, 119, 6, .18);
+    }
     .segmented { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
     .chip {
       border: 1px solid var(--line);
@@ -288,7 +300,7 @@
     .chip.active { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); }
     .selector-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
     .select-card {
-      min-height: 64px;
+      min-height: 76px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
@@ -307,6 +319,83 @@
       gap: 10px;
       text-align: left;
     }
+    .screen-hero {
+      grid-column: span 12;
+      border: 1px solid #f5d6a2;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #fff7ed, #ecfccb);
+      padding: 18px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 8px;
+    }
+    .screen-hero h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+    .screen-hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .stat-card {
+      min-height: 96px;
+      border: 1px solid #f3dfbc;
+      border-radius: 8px;
+      background: #fffdf8;
+      padding: 14px;
+      display: grid;
+      align-content: space-between;
+    }
+    .stat-card strong { font-size: 28px; line-height: 1; }
+    .stat-card span { color: var(--muted); font-size: 13px; font-weight: 800; }
+    .chore-card {
+      min-height: 92px;
+      border: 1px solid #eadfce;
+      border-radius: 8px;
+      background: #fffdf8;
+      box-shadow: 0 4px 14px rgba(105, 71, 31, .06);
+    }
+    .chore-card.active {
+      border-color: #d97706;
+      background: #fff7ed;
+      box-shadow: 0 0 0 3px rgba(217, 119, 6, .14);
+    }
+    .chore-icon {
+      width: 54px;
+      height: 54px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      font-weight: 900;
+      background: var(--peach);
+    }
+    .upload-zone {
+      border: 2px dashed #f0c987;
+      border-radius: 8px;
+      background: #fffaf3;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .ai-result-card {
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      background: #f0fdf4;
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+    }
+    .approval-card {
+      border: 1px solid #f3dfbc;
+      border-radius: 8px;
+      background: #fffdf8;
+      padding: 12px;
+      box-shadow: 0 5px 16px rgba(105, 71, 31, .07);
+    }
+    .approval-card.pending { border-color: #facc15; background: #fffbea; }
     .chore-row.active { border-color: var(--blue); background: var(--blue-soft); }
     .calendar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
     .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
@@ -554,7 +643,7 @@
     const FORCED_NOW = URL_PARAMS.get('now');
     const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
     const TEST_MODE = STORAGE_MODE === 'test'
-      || (!STORAGE_MODE && LOCAL_HOSTS.has(location.hostname))
+      || (!STORAGE_MODE && isLocalTestHost(location.hostname))
       || window.__FORHOME_TEST__ === true;
     const PARENT_IDS = ['mom', 'dad'];
     const BRIEFING_HOUR = 7;
@@ -612,6 +701,16 @@
     }
     function careItemSeed(id, name, emoji, points) {
       return { id, name, emoji, points, xp: points * 10 };
+    }
+
+    function isLocalTestHost(hostname) {
+      const host = String(hostname || '').toLowerCase();
+      if (LOCAL_HOSTS.has(host)) return true;
+      if (host.endsWith('.local')) return true;
+      if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      return false;
     }
 
     let state = defaultState();
@@ -999,7 +1098,7 @@
       return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${memberRole(m) === 'adult' ? '성인 권한' : '아이 권한'}</div></div></button>`;
     }
     function renderChoreSelect(c) {
-      return `<button class="chore-row ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="avatar">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP · ${c.fatigue}P</span></button>`;
+      return `<button class="chore-row chore-card ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="chore-icon">${escapeHtml(c.emoji)}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini">${CATEGORIES[c.category] || c.category}</span></span><span class="tag blue">${c.xp}XP · ${c.fatigue}P</span></button>`;
     }
 
     function renderDay(d, currentMonth) {
@@ -1445,13 +1544,18 @@
       const briefing = buildMorningBriefing(todayKeyValue);
       $('section-home').innerHTML = `
         <div class="grid">
+          <div class="screen-hero">
+            <span class="tag amber">ForHome</span>
+            <h2>오늘 우리 집 수고를 함께 확인해요</h2>
+            <p>사진이나 짧은 메모로 집안일을 인증하고, 가족이 확인하면 수고 포인트가 쌓입니다.</p>
+          </div>
           ${shouldShowMorningBriefing() ? renderBriefingPanel(briefing) : ''}
           <div class="panel span-5">
             <div class="panel-head"><div class="panel-title">오늘 요약</div><span class="tag blue">v${state.version || 0}</span></div>
             <div class="metric-row">
-              <div class="metric"><span>기록</span><strong>${today.length}</strong></div>
-              <div class="metric"><span>확인 완료</span><strong>${approved.length}</strong></div>
-              <div class="metric"><span>확인 대기</span><strong>${todayPending.length}</strong></div>
+              <div class="stat-card"><span>오늘 기록</span><strong>${today.length}</strong></div>
+              <div class="stat-card"><span>확인 완료</span><strong>${approved.length}</strong></div>
+              <div class="stat-card"><span>부모 확인 대기</span><strong>${todayPending.length}</strong></div>
             </div>
           </div>
           <div class="panel span-7">
@@ -1528,29 +1632,38 @@
       const reviewerText = reviewers.length ? reviewers.map(id => member(id)?.name || id).join(', ') : '자동 승인';
       $('section-tasks').innerHTML = `
         <div class="grid">
+          <div class="screen-hero">
+            <span class="tag teal">사진 인증</span>
+            <h2>집안일을 골라서 인증해요</h2>
+            <p>아이도 쉽게 누를 수 있도록 큰 카드와 사진 중심으로 만들었습니다.</p>
+          </div>
           <div class="panel span-12">
             <div class="panel-head"><div class="panel-title">누가 했나요</div></div>
             <div class="selector-grid">${state.members.map(renderMemberSelect).join('')}</div>
           </div>
           <div class="panel span-7">
-            <div class="panel-head"><div class="panel-title">무슨 일을 했나요</div></div>
+            <div class="panel-head"><div class="panel-title">집안일 목록 카드</div><span class="mini">큰 카드를 눌러 선택</span></div>
             <div class="segmented" style="margin-bottom:10px;">${Object.entries(CATEGORIES).map(([id, label]) => `<button class="chip ${selectedCategory === id ? 'active' : ''}" onclick="setCategory('${id}')">${label}</button>`).join('')}</div>
             <div class="list" data-testid="chore-list">${chores.map(renderChoreSelect).join('')}</div>
           </div>
           <div class="panel span-5">
-            <div class="panel-head"><div class="panel-title">증빙과 확인 요청</div></div>
+            <div class="panel-head"><div class="panel-title">사진 업로드 인증</div><span class="tag amber">${selectedChore ? `${selectedChore.fatigue}P` : '선택 필요'}</span></div>
             <div class="briefing-item" data-testid="auto-reviewers"><strong>자동 확인자</strong><div class="mini">${escapeHtml(reviewerText)}</div></div>
-            <div class="field">
+            <div class="field upload-zone">
               <label for="proofPhoto">사진</label>
               <input id="proofPhoto" data-testid="proof-photo" type="file" accept="image/*" capture="environment" onchange="handleProofSelected(event)">
               <img id="proofPreview" class="proof-preview" hidden alt="증빙 사진">
               <div class="mini" id="proofStatus">사진 없음</div>
             </div>
+            <div class="ai-result-card">
+              <strong>AI 분석 결과</strong>
+              <div class="mini" id="aiAnalysisText">사진을 올리면 크기와 파일 정보를 분석해서 보여줍니다.</div>
+            </div>
             <div class="field">
               <label for="proofCaption">메모</label>
               <textarea id="proofCaption" data-testid="proof-caption" placeholder="예: 싱크대 정리까지 끝냈음"></textarea>
             </div>
-            <button class="btn primary full" data-testid="complete-task" onclick="completeTask()">확인 요청 보내기</button>
+            <button class="btn primary full kid" data-testid="complete-task" onclick="completeTask()">확인 요청 보내기</button>
           </div>
         </div>`;
       currentProof = null;
@@ -1566,6 +1679,11 @@
         .slice(0, 30);
       $('section-badges').innerHTML = `
         <div class="grid">
+          <div class="screen-hero">
+            <span class="tag amber">부모 승인</span>
+            <h2>가족이 올린 인증을 확인해요</h2>
+            <p>사진과 메모를 보고 확인했어요 또는 다시 확인 요청을 선택합니다.</p>
+          </div>
           <div class="panel span-12">
             <div class="panel-head"><div class="panel-title">${session?.isAdmin ? '전체 확인 대기' : '내가 확인할 것'}</div><span class="tag amber">${pending.length}</span></div>
             <div class="list">${pending.length ? pending.map(renderReviewItem).join('') : '<div class="empty">확인할 기록이 없어요</div>'}</div>
@@ -1721,12 +1839,12 @@
       const c = chore(entry.choreId);
       const status = statusMeta(entry.verificationStatus);
       const proof = entry.proofImage ? `<img class="photo-cell" src="${entry.proofImage}" alt="증빙 사진">` : `<div class="photo-cell" style="display:grid;place-items:center;color:var(--muted);font-size:12px;">사진 없음</div>`;
-      return `<div class="review-row">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 가족에게 공유된 수고 · ${entry.fatigueAdded || 0}P · ${entry.xpEarned || 0}XP</div><div class="approval-list">${approvalBadges(entry)}</div><div class="mini">${escapeHtml(reviewProgressText(entry))}</div>${entry.proofCaption ? `<div class="mini">${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="mini">${escapeHtml(entry.proofAnalysis)}</div>` : ''}${entry.reviewNote ? `<div class="mini">다시 확인 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
+      return `<div class="review-row approval-card ${entry.verificationStatus === 'pending' ? 'pending' : ''}">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 수고 포인트 ${entry.fatigueAdded || 0}P · ${entry.xpEarned || 0}XP</div><div class="approval-list">${approvalBadges(entry)}</div><div class="mini">${escapeHtml(reviewProgressText(entry))}</div>${entry.proofCaption ? `<div class="mini">메모: ${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="ai-result-card"><strong>AI 분석 결과</strong><div class="mini">${escapeHtml(entry.proofAnalysis)}</div></div>` : ''}${entry.reviewNote ? `<div class="mini">다시 확인 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
     }
 
     function renderReviewItem(entry) {
       const canReview = canReviewEntry(entry);
-      return `<div class="review-row">${renderActivity(entry)}<div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인했어요</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
+      return `<div>${renderActivity(entry)}<div class="review-actions"><button class="btn primary kid" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인했어요</button><button class="btn danger kid" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
     }
 
     function renderChangeRequestItem(request) {
@@ -1801,20 +1919,25 @@
       currentProofPromise = null;
       const preview = $('proofPreview');
       const status = $('proofStatus');
+      const aiText = $('aiAnalysisText');
       if (!file) {
         preview.hidden = true;
         status.textContent = '사진 없음';
+        if (aiText) aiText.textContent = '사진을 올리면 크기와 파일 정보를 분석해서 보여줍니다.';
         return;
       }
       status.textContent = '사진 확인 중';
+      if (aiText) aiText.textContent = 'AI가 사진 정보를 살펴보는 중입니다...';
       currentProofPromise = readProofImage(file).then((proof) => {
         currentProof = proof;
         preview.src = proof.dataUrl;
         preview.hidden = false;
         status.textContent = proof.analysis;
+        if (aiText) aiText.textContent = proof.analysis;
         return proof;
       }).catch((err) => {
         status.textContent = `사진 처리 실패: ${err.message}`;
+        if (aiText) aiText.textContent = err.message;
         return null;
       });
       await currentProofPromise;
