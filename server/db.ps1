@@ -1,4 +1,11 @@
-$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$dbScriptPath = $MyInvocation.MyCommand.Path
+if (-not $dbScriptPath -and $PSScriptRoot) {
+    $dbScriptPath = Join-Path $PSScriptRoot "db.ps1"
+}
+if (-not $dbScriptPath) {
+    throw "Could not resolve server\db.ps1 path."
+}
+$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $dbScriptPath) ".."))
 $DataDir = Join-Path $RepoRoot "data"
 $DbConfigPath = Join-Path $DataDir "db.env.ps1"
 $SchemaPath = Join-Path $PSScriptRoot "sql\schema.sql"
@@ -13,16 +20,41 @@ function Load-DbConfig {
     if (-not $env:PGHOST) { $env:PGHOST = "localhost" }
     if (-not $env:PGPORT) { $env:PGPORT = "5432" }
     if (-not $env:PGDATABASE) { $env:PGDATABASE = "forhome" }
-    if (-not $env:PGUSER) { $env:PGUSER = "postgres" }
+    $env:PGUSER = "postgres"
     $env:PGCLIENTENCODING = "UTF8"
 }
 
-function Assert-Psql {
+function Find-PsqlPath {
     $cmd = Get-Command psql -ErrorAction SilentlyContinue
-    if (-not $cmd) {
+    if ($cmd) { return $cmd.Source }
+
+    $candidates = @()
+    $programFiles = @(
+        ${env:ProgramFiles},
+        ${env:"ProgramFiles(x86)"},
+        "C:\Program Files"
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    foreach ($root in $programFiles) {
+        $pgRoot = Join-Path $root "PostgreSQL"
+        if (-not (Test-Path $pgRoot)) { continue }
+        $candidates += Get-ChildItem -Path $pgRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "bin\psql.exe" } |
+            Where-Object { Test-Path $_ }
+    }
+
+    if ($candidates.Count -gt 0) {
+        return ($candidates | Sort-Object -Descending | Select-Object -First 1)
+    }
+    return $null
+}
+
+function Assert-Psql {
+    $psqlPath = Find-PsqlPath
+    if (-not $psqlPath) {
         throw "PostgreSQL client psql was not found. Install PostgreSQL and add its bin directory to PATH."
     }
-    return $cmd.Source
+    return $psqlPath
 }
 
 function Sql-Literal($Value) {
@@ -90,13 +122,27 @@ function Sql-TimestampExpr($Milliseconds) {
     return "to_timestamp(($value) / 1000.0)"
 }
 
+function Invoke-PsqlNative {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        return & $Command
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Invoke-PsqlText($Sql, $Database = $env:PGDATABASE) {
     Load-DbConfig
     $psql = Assert-Psql
     $tmp = [System.IO.Path]::GetTempFileName()
     [System.IO.File]::WriteAllText($tmp, $Sql, (New-Object System.Text.UTF8Encoding($false)))
     try {
-        $output = & $psql -X -v ON_ERROR_STOP=1 -q -d $Database -f $tmp 2>&1
+        $output = Invoke-PsqlNative { & $psql -w -X -v ON_ERROR_STOP=1 -q -d $Database -f $tmp 2>&1 }
         if ($LASTEXITCODE -ne 0) {
             throw ($output -join "`n")
         }
@@ -112,7 +158,7 @@ function Invoke-PsqlCsv($Query) {
     $outFile = [System.IO.Path]::GetTempFileName()
     $copy = "\copy ($Query) TO STDOUT WITH CSV HEADER"
     try {
-        $output = & $psql -X -q -v ON_ERROR_STOP=1 -P footer=off -d $env:PGDATABASE -c $copy -o $outFile 2>&1
+        $output = Invoke-PsqlNative { & $psql -w -X -q -v ON_ERROR_STOP=1 -P footer=off -d $env:PGDATABASE -c $copy -o $outFile 2>&1 }
         if ($LASTEXITCODE -ne 0) {
             throw ($output -join "`n")
         }
@@ -128,12 +174,13 @@ function Ensure-PostgresDatabase {
     Load-DbConfig
     $psql = Assert-Psql
     $dbName = $env:PGDATABASE
-    $test = & $psql -X -q -t -A -d $dbName -c "SELECT 1" 2>&1
-    if ($LASTEXITCODE -eq 0 -and (($test -join "").Trim()) -eq "1") { return }
-
-    $exists = & $psql -X -q -t -A -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$($dbName.Replace("'", "''"))'" 2>&1
+    $exists = Invoke-PsqlNative { & $psql -w -X -q -t -A -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$($dbName.Replace("'", "''"))'" 2>&1 }
     if ($LASTEXITCODE -ne 0) {
-        throw "Cannot connect to PostgreSQL. Check data\db.env.ps1 and PostgreSQL service status. $($exists -join "`n")"
+        $detail = ($exists -join "`n")
+        if ($detail -match "password authentication failed") {
+            throw "PostgreSQL password authentication failed. Set `$env:PGPASSWORD in data\db.env.ps1 to the postgres password chosen during installation."
+        }
+        throw "Cannot connect to PostgreSQL. Check data\db.env.ps1 and PostgreSQL service status. $detail"
     }
     if ((($exists -join "").Trim()) -ne "1") {
         Invoke-PsqlText "CREATE DATABASE $(Sql-Ident $dbName) ENCODING 'UTF8';" "postgres" | Out-Null

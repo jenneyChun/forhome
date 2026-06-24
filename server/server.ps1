@@ -354,10 +354,18 @@ function Clear-PortListener {
     param([int]$Port)
 
     $currentPid = $PID
+    $protected = New-Object 'System.Collections.Generic.HashSet[int]'
+    $protected.Add($currentPid) | Out-Null
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$currentPid" -ErrorAction SilentlyContinue
+    while ($proc -and $proc.ParentProcessId) {
+        $protected.Add($proc.ParentProcessId) | Out-Null
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)" -ErrorAction SilentlyContinue
+    }
+
     for ($attempt = 1; $attempt -le 6; $attempt++) {
         Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object {
-                $_.ProcessId -ne $currentPid -and
+                -not $protected.Contains($_.ProcessId) -and
                 $_.CommandLine -match 'server\.ps1' -and
                 $_.CommandLine -match "-Port\s+$Port\b"
             } |
@@ -368,9 +376,9 @@ function Clear-PortListener {
             }
 
         $relatedPids = @(Get-NetTCPConnection -ErrorAction SilentlyContinue |
-            Where-Object { $_.LocalPort -eq $Port -or $_.RemotePort -eq $Port } |
+            Where-Object { $_.LocalPort -eq $Port -and $_.State -eq "Listen" } |
             Select-Object -ExpandProperty OwningProcess -Unique |
-            Where-Object { $_ -and $_ -ne $currentPid })
+            Where-Object { $_ -and -not $protected.Contains($_) })
         foreach ($ownerPid in $relatedPids) {
             Stop-PortOwner -OwnerPid $ownerPid
         }
