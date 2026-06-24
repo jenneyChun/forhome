@@ -788,22 +788,21 @@ function Update-DbProfile($Session, $Body) {
     if (-not $Session) { throw "Login is required." }
     $userRows = Invoke-PsqlCsv "SELECT id, account_id, password_hash, display_name FROM users WHERE id = $(Sql-Literal $Session.userId) LIMIT 1"
     if ($userRows.Count -eq 0) { throw "User not found." }
-    $displayName = if ($Body.displayName) { [string]$Body.displayName.Trim() } else { $userRows[0].display_name }
+    $displayNameInput = if ($Body.'displayName') { [string]$Body.'displayName'.Trim() } else { $null }
+    $displayName = if ($displayNameInput) { $displayNameInput } else { $userRows[0].display_name }
     if ([string]::IsNullOrWhiteSpace($displayName)) { throw "displayName is required." }
     $sql = New-Object System.Text.StringBuilder
     [void]$sql.AppendLine("BEGIN;")
-    if ($Body.password) {
-        $currentPassword = [string]$Body.currentPassword
+    if ($Body.'password') {
+        $currentPassword = [string]$Body.'currentPassword'
         if (-not (Test-PasswordHash $currentPassword $userRows[0].password_hash)) { throw "Current password is incorrect." }
-        $passwordHash = New-PasswordHash $Body.password
+        $passwordHash = New-PasswordHash $Body.'password'
         [void]$sql.AppendLine("UPDATE users SET password_hash = $(Sql-Literal $passwordHash), updated_at = now() WHERE id = $(Sql-Literal $Session.userId);")
     }
     [void]$sql.AppendLine("UPDATE users SET display_name = $(Sql-Literal $displayName), updated_at = now() WHERE id = $(Sql-Literal $Session.userId);")
-    if ($Body.householdName) {
-        $householdName = [string]$Body.householdName.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($householdName)) {
-            [void]$sql.AppendLine("UPDATE households SET name = $(Sql-Literal $householdName), updated_at = now() WHERE id = $(Sql-Literal $Session.householdId);")
-        }
+    $householdNameInput = if ($Body.'householdName') { [string]$Body.'householdName'.Trim() } else { $null }
+    if (-not [string]::IsNullOrWhiteSpace($householdNameInput)) {
+        [void]$sql.AppendLine("UPDATE households SET name = $(Sql-Literal $householdNameInput), updated_at = now() WHERE id = $(Sql-Literal $Session.householdId);")
     }
     $memberRows = Invoke-PsqlCsv "SELECT id FROM household_members WHERE household_id = $(Sql-Literal $Session.householdId) AND user_id = $(Sql-Literal $Session.userId) LIMIT 1"
     if ($memberRows.Count) {
