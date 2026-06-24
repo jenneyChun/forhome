@@ -34,8 +34,19 @@ Assert-True ($null -ne $session) "Login session is readable"
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $state = Get-DbState $session.householdId
 $sw.Stop()
-Assert-True ($sw.ElapsedMilliseconds -lt 20000) "Get-DbState completes under 20s (took $($sw.ElapsedMilliseconds)ms)"
+Assert-True ($sw.ElapsedMilliseconds -lt 5000) "Get-DbState completes under 5s (took $($sw.ElapsedMilliseconds)ms)"
 Assert-True ($null -ne $state.householdName) "Get-DbState returns householdName"
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$summary = Get-DbStateSummary $session.householdId
+$sw.Stop()
+Assert-True ($sw.ElapsedMilliseconds -lt 3000) "Get-DbStateSummary completes under 3s (took $($sw.ElapsedMilliseconds)ms)"
+Assert-True ($null -ne $summary.householdName) "Get-DbStateSummary returns householdName"
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$version = Get-DbStateVersion
+$sw.Stop()
+Assert-True ($sw.ElapsedMilliseconds -lt 1000) "Get-DbStateVersion completes under 1s (took $($sw.ElapsedMilliseconds)ms)"
 
 if ($failures.Count -gt 0) {
     Write-Host ""

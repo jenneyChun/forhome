@@ -170,6 +170,238 @@ function Invoke-PsqlCsv($Query) {
     }
 }
 
+function Invoke-PsqlCsvBatch {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Queries
+    )
+    if ($Queries.Count -eq 0) { return @{} }
+    Load-DbConfig
+    $psql = Assert-Psql
+    $scriptPath = [System.IO.Path]::GetTempFileName() + ".sql"
+    $fileMap = @{}
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($key in ($Queries.Keys | Sort-Object)) {
+        $outFile = [System.IO.Path]::GetTempFileName()
+        $fileMap[$key] = $outFile
+        $pgPath = $outFile.Replace('\', '/').Replace("'", "''")
+        [void]$lines.Add("\copy ($($Queries[$key])) TO '$pgPath' WITH CSV HEADER")
+    }
+    [System.IO.File]::WriteAllText($scriptPath, ($lines -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    try {
+        $output = Invoke-PsqlNative { & $psql -w -X -q -v ON_ERROR_STOP=1 -d $env:PGDATABASE -f $scriptPath 2>&1 }
+        if ($LASTEXITCODE -ne 0) {
+            throw ($output -join "`n")
+        }
+        $result = @{}
+        foreach ($key in $fileMap.Keys) {
+            $path = $fileMap[$key]
+            if (-not (Test-Path -LiteralPath $path)) {
+                $result[$key] = @()
+                continue
+            }
+            $content = Get-Content -Raw -Encoding UTF8 $path
+            if ([string]::IsNullOrWhiteSpace($content)) {
+                $result[$key] = @()
+            } else {
+                $result[$key] = @($content | ConvertFrom-Csv)
+            }
+        }
+        return $result
+    } finally {
+        Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+        foreach ($path in $fileMap.Values) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-DbHistorySelectColumns {
+    return "id, member_id, chore_id, chore_name, chore_emoji, category, fatigue_added, xp_earned, verification_status, CASE WHEN proof_image IS NOT NULL AND proof_image <> '' THEN TRUE ELSE FALSE END AS has_proof_image, proof_caption, proof_analysis, review_note, completed_at_ms"
+}
+
+function Get-DbStateQuerySet($HouseholdId, $Mode = "full") {
+    $hid = Sql-Literal $HouseholdId
+    $historyCols = Get-DbHistorySelectColumns
+    $historySince = ""
+    if ($Mode -eq "summary") {
+        $historySince = " AND completed_at_ms >= (EXTRACT(EPOCH FROM (now() - interval '14 days')) * 1000)::bigint"
+    }
+    $queries = [ordered]@{
+        meta = "SELECT version, updated_at FROM app_version WHERE singleton = TRUE"
+        household = "SELECT name FROM households WHERE id = $hid LIMIT 1"
+        settings = "SELECT vacation_threshold, week_starts_on FROM settings WHERE household_id = $hid"
+        members = "SELECT id, name, emoji, restricted, role, color, xp, total_fatigue, completed_tasks, stickers, on_vacation FROM household_members WHERE household_id = $hid ORDER BY sort_order, created_at, id"
+        accounts = "SELECT u.account_id, u.display_name, u.is_admin, hm.id AS member_id FROM users u LEFT JOIN household_members hm ON hm.user_id = u.id AND hm.household_id = $hid WHERE u.active = TRUE ORDER BY u.account_id"
+        chores = "SELECT id, name, emoji, fatigue, xp, category FROM chores WHERE household_id = $hid ORDER BY sort_order, created_at, id"
+        history = "SELECT $historyCols FROM task_entries WHERE household_id = $hid$historySince ORDER BY completed_at_ms, id"
+        approvals = "SELECT ta.entry_id, ta.reviewer_id, ta.status, ta.reviewed_at_ms, ta.review_note FROM task_approvals ta JOIN task_entries te ON te.id = ta.entry_id AND te.household_id = $hid WHERE ta.household_id = $hid$($historySince.Replace('completed_at_ms', 'te.completed_at_ms')) ORDER BY ta.entry_id, ta.reviewer_id"
+        recipients = "SELECT tpr.entry_id, tpr.member_id FROM task_point_recipients tpr JOIN task_entries te ON te.id = tpr.entry_id AND te.household_id = $hid WHERE tpr.household_id = $hid$($historySince.Replace('completed_at_ms', 'te.completed_at_ms')) ORDER BY tpr.entry_id, tpr.member_id"
+        plans = "SELECT id, from_member_id, to_member_id, chore_id, title, target_date, note, status, request_status, decline_reason, responded_at_ms, created_at_ms FROM tomorrow_plans WHERE household_id = $hid ORDER BY created_at_ms, id"
+    }
+    if ($Mode -eq "full") {
+        $queries.messages = "SELECT id, from_member_id, to_member_id, text, sent_at_ms FROM messages WHERE household_id = $hid ORDER BY sent_at_ms, id"
+        $queries.badges = "SELECT id, member_id, badge_id, name, emoji, earned_at_ms FROM badge_history WHERE household_id = $hid ORDER BY earned_at_ms, id"
+        $queries.memberBadges = "SELECT member_id, badge_id FROM member_badges WHERE household_id = $hid ORDER BY earned_at_ms, badge_id"
+        $queries.careItems = "SELECT id, name, emoji, points, xp, locked FROM care_items WHERE household_id = $hid ORDER BY sort_order, created_at, id"
+        $queries.assignments = "SELECT date_key, morning_id, evening_id, updated_at_ms FROM care_assignments WHERE household_id = $hid ORDER BY date_key"
+        $careSince = ""
+        $queries.careSessions = "SELECT id, date_key, member_id, care_item_id, child_member_id, points, xp_earned, start_time, end_time, minutes, note, created_at_ms FROM care_sessions WHERE household_id = $hid$careSince ORDER BY date_key, start_time, id"
+        $queries.careRecipients = "SELECT session_id, member_id FROM care_session_point_recipients WHERE household_id = $hid ORDER BY session_id, member_id"
+        $queries.changes = "SELECT id, type, before_json::text AS before_json, after_json::text AS after_json, requested_by, requested_at_ms, status, reviewed_at_ms, review_note, applied_at_ms FROM change_requests WHERE household_id = $hid ORDER BY requested_at_ms, id"
+        $queries.changeApprovals = "SELECT request_id, reviewer_id, status, reviewed_at_ms, review_note FROM change_request_approvals WHERE household_id = $hid ORDER BY request_id, reviewer_id"
+    } elseif ($Mode -eq "summary") {
+        $careSince = " AND created_at_ms >= (EXTRACT(EPOCH FROM (now() - interval '14 days')) * 1000)::bigint"
+        $queries.assignments = "SELECT date_key, morning_id, evening_id, updated_at_ms FROM care_assignments WHERE household_id = $hid ORDER BY date_key"
+        $queries.careSessions = "SELECT id, date_key, member_id, care_item_id, child_member_id, points, xp_earned, start_time, end_time, minutes, note, created_at_ms FROM care_sessions WHERE household_id = $hid$careSince ORDER BY date_key, start_time, id"
+        $queries.careRecipients = "SELECT csr.session_id, csr.member_id FROM care_session_point_recipients csr JOIN care_sessions cs ON cs.id = csr.session_id AND cs.household_id = $hid WHERE csr.household_id = $hid$($careSince.Replace('created_at_ms', 'cs.created_at_ms')) ORDER BY csr.session_id, csr.member_id"
+    }
+    $batch = @{}
+    foreach ($entry in $queries.GetEnumerator()) {
+        $batch[$entry.Key] = $entry.Value
+    }
+    return $batch
+}
+
+function Convert-DbRowSetsToState($Rows) {
+    $meta = if ($Rows.meta) { $Rows.meta } else { @() }
+    $householdRows = if ($Rows.household) { $Rows.household } else { @() }
+    $settingsRows = if ($Rows.settings) { $Rows.settings } else { @() }
+    $memberRows = if ($Rows.members) { $Rows.members } else { @() }
+    $accountRows = if ($Rows.accounts) { $Rows.accounts } else { @() }
+    $choreRows = if ($Rows.chores) { $Rows.chores } else { @() }
+    $historyRows = if ($Rows.history) { $Rows.history } else { @() }
+    $approvalRows = if ($Rows.approvals) { $Rows.approvals } else { @() }
+    $recipientRows = if ($Rows.recipients) { $Rows.recipients } else { @() }
+    $messageRows = if ($Rows.messages) { $Rows.messages } else { @() }
+    $badgeRows = if ($Rows.badges) { $Rows.badges } else { @() }
+    $memberBadgeRows = if ($Rows.memberBadges) { $Rows.memberBadges } else { @() }
+    $careItemRows = if ($Rows.careItems) { $Rows.careItems } else { @() }
+    $assignmentRows = if ($Rows.assignments) { $Rows.assignments } else { @() }
+    $careRows = if ($Rows.careSessions) { $Rows.careSessions } else { @() }
+    $careRecipientRows = if ($Rows.careRecipients) { $Rows.careRecipients } else { @() }
+    $planRows = if ($Rows.plans) { $Rows.plans } else { @() }
+    $changeRows = if ($Rows.changes) { $Rows.changes } else { @() }
+    $changeApprovalRows = if ($Rows.changeApprovals) { $Rows.changeApprovals } else { @() }
+
+    $earnedByMember = @{}
+    foreach ($row in $memberBadgeRows) {
+        if (-not $earnedByMember.ContainsKey($row.member_id)) { $earnedByMember[$row.member_id] = @() }
+        $earnedByMember[$row.member_id] += $row.badge_id
+    }
+
+    $approvalsByEntry = @{}
+    foreach ($row in $approvalRows) {
+        if (-not $approvalsByEntry.ContainsKey($row.entry_id)) { $approvalsByEntry[$row.entry_id] = @() }
+        $approvalsByEntry[$row.entry_id] += [pscustomobject]@{
+            reviewerId = $row.reviewer_id
+            status = $row.status
+            reviewedAt = Convert-CsvNullableLong $row.reviewed_at_ms
+            reviewNote = $row.review_note
+        }
+    }
+
+    $recipientsByEntry = @{}
+    foreach ($row in $recipientRows) {
+        if (-not $recipientsByEntry.ContainsKey($row.entry_id)) { $recipientsByEntry[$row.entry_id] = @() }
+        $recipientsByEntry[$row.entry_id] += $row.member_id
+    }
+
+    $careRecipientsBySession = @{}
+    foreach ($row in $careRecipientRows) {
+        if (-not $careRecipientsBySession.ContainsKey($row.session_id)) { $careRecipientsBySession[$row.session_id] = @() }
+        $careRecipientsBySession[$row.session_id] += $row.member_id
+    }
+
+    $approvalsByChange = @{}
+    foreach ($row in $changeApprovalRows) {
+        if (-not $approvalsByChange.ContainsKey($row.request_id)) { $approvalsByChange[$row.request_id] = @() }
+        $approvalsByChange[$row.request_id] += [pscustomobject]@{
+            reviewerId = $row.reviewer_id
+            status = $row.status
+            reviewedAt = Convert-CsvNullableLong $row.reviewed_at_ms
+            reviewNote = $row.review_note
+        }
+    }
+
+    $settings = if ($settingsRows.Count) {
+        @{ vacationThreshold = Convert-CsvInt $settingsRows[0].vacation_threshold; weekStartsOn = Convert-CsvInt $settingsRows[0].week_starts_on }
+    } else {
+        @{ vacationThreshold = 25; weekStartsOn = 1 }
+    }
+
+    $householdName = if ($householdRows.Count) { $householdRows[0].name } else { "ForHome" }
+
+    [pscustomobject]@{
+        version = if ($meta.Count) { Convert-CsvLong $meta[0].version } else { 0 }
+        updatedAt = if ($meta.Count) { $meta[0].updated_at } else { [DateTime]::UtcNow.ToString("o") }
+        householdName = $householdName
+        settings = $settings
+        members = @($memberRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.id; name = $_.name; emoji = $_.emoji; restricted = Convert-CsvBool $_.restricted; role = $_.role; color = $_.color
+                xp = Convert-CsvInt $_.xp; totalFatigue = Convert-CsvInt $_.total_fatigue; completedTasks = Convert-CsvInt $_.completed_tasks
+                stickers = Convert-CsvInt $_.stickers; onVacation = Convert-CsvBool $_.on_vacation
+                earnedBadges = if ($earnedByMember.ContainsKey($_.id)) { @($earnedByMember[$_.id]) } else { @() }
+            }
+        })
+        accounts = @($accountRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.account_id; password = "********"; displayName = $_.display_name
+                memberId = if ($_.member_id) { $_.member_id } else { $null }; isAdmin = Convert-CsvBool $_.is_admin
+            }
+        })
+        chores = @($choreRows | ForEach-Object {
+            [pscustomobject]@{ id = $_.id; name = $_.name; emoji = $_.emoji; fatigue = Convert-CsvInt $_.fatigue; xp = Convert-CsvInt $_.xp; category = $_.category }
+        })
+        history = @($historyRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.id; memberId = $_.member_id; choreId = $_.chore_id; choreName = $_.chore_name; choreEmoji = $_.chore_emoji; category = $_.category
+                fatigueAdded = Convert-CsvInt $_.fatigue_added; xpEarned = Convert-CsvInt $_.xp_earned; verificationStatus = $_.verification_status
+                proofImage = ""; hasProofImage = Convert-CsvBool $_.has_proof_image; proofCaption = $_.proof_caption; proofAnalysis = $_.proof_analysis; reviewNote = $_.review_note
+                approvalRequests = if ($approvalsByEntry.ContainsKey($_.id)) { @($approvalsByEntry[$_.id]) } else { @() }
+                pointRecipients = if ($recipientsByEntry.ContainsKey($_.id)) { @($recipientsByEntry[$_.id]) } else { @($_.member_id) }
+                timestamp = Convert-CsvLong $_.completed_at_ms
+            }
+        })
+        messages = @($messageRows | ForEach-Object {
+            [pscustomobject]@{ id = $_.id; fromId = $_.from_member_id; toId = if ($_.to_member_id) { $_.to_member_id } else { $null }; text = $_.text; timestamp = Convert-CsvLong $_.sent_at_ms }
+        })
+        badgeHistory = @($badgeRows | ForEach-Object {
+            [pscustomobject]@{ id = $_.id; memberId = $_.member_id; badgeId = $_.badge_id; name = $_.name; emoji = $_.emoji; timestamp = Convert-CsvLong $_.earned_at_ms }
+        })
+        careItems = @($careItemRows | ForEach-Object {
+            [pscustomobject]@{ id = $_.id; name = $_.name; emoji = $_.emoji; points = Convert-CsvInt $_.points; xp = Convert-CsvInt $_.xp; locked = Convert-CsvBool $_.locked }
+        })
+        careAssignments = @($assignmentRows | ForEach-Object {
+            [pscustomobject]@{ date = $_.date_key; morningId = $_.morning_id; eveningId = $_.evening_id; updatedAt = Convert-CsvNullableLong $_.updated_at_ms }
+        })
+        careSessions = @($careRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.id; date = $_.date_key; memberId = $_.member_id; careItemId = $_.care_item_id; childMemberId = $_.child_member_id
+                pointRecipients = if ($careRecipientsBySession.ContainsKey($_.id)) { @($careRecipientsBySession[$_.id]) } else { @($_.member_id) }
+                points = Convert-CsvInt $_.points; xpEarned = Convert-CsvInt $_.xp_earned; startTime = $_.start_time; endTime = $_.end_time
+                minutes = Convert-CsvInt $_.minutes; note = $_.note; createdAt = Convert-CsvLong $_.created_at_ms
+            }
+        })
+        tomorrowPlans = @($planRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.id; fromId = $_.from_member_id; toId = $_.to_member_id; choreId = $_.chore_id; title = $_.title; targetDate = $_.target_date
+                note = $_.note; status = $_.status; requestStatus = $_.request_status; declineReason = $_.decline_reason
+                respondedAt = Convert-CsvNullableLong $_.responded_at_ms; createdAt = Convert-CsvLong $_.created_at_ms
+            }
+        })
+        changeRequests = @($changeRows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.id; type = $_.type; before = Convert-CsvJson $_.before_json; after = Convert-CsvJson $_.after_json; requestedBy = $_.requested_by
+                requestedAt = Convert-CsvLong $_.requested_at_ms; status = $_.status; reviewedAt = Convert-CsvNullableLong $_.reviewed_at_ms
+                reviewNote = $_.review_note; appliedAt = Convert-CsvNullableLong $_.applied_at_ms
+                approvalRequests = if ($approvalsByChange.ContainsKey($_.id)) { @($approvalsByChange[$_.id]) } else { @() }
+            }
+        })
+    }
+}
+
 function Ensure-PostgresDatabase {
     Load-DbConfig
     $psql = Assert-Psql
@@ -317,150 +549,43 @@ function Ensure-DefaultUsers {
 function Get-DbHealth {
     try {
         Initialize-Database
-        [pscustomobject]@{ ok = $true; storage = "postgresql"; mode = "api"; database = $env:PGDATABASE }
+        [pscustomobject]@{ ok = $true; storage = "postgresql"; mode = "api"; database = $env:PGDATABASE; dbWarm = [bool]$script:DatabaseInitialized }
     } catch {
-        [pscustomobject]@{ ok = $false; storage = "postgresql"; mode = "api"; error = "$_" }
+        [pscustomobject]@{ ok = $false; storage = "postgresql"; mode = "api"; error = "$_"; dbWarm = [bool]$script:DatabaseInitialized }
+    }
+}
+
+function Get-DbStateVersion {
+    Initialize-Database
+    $meta = Invoke-PsqlCsv "SELECT version, updated_at FROM app_version WHERE singleton = TRUE"
+    [pscustomobject]@{
+        version = if ($meta.Count) { Convert-CsvLong $meta[0].version } else { 0 }
+        updatedAt = if ($meta.Count) { $meta[0].updated_at } else { $null }
     }
 }
 
 function Get-DbState($HouseholdId = $DefaultHouseholdId) {
     Initialize-Database
+    $rows = Invoke-PsqlCsvBatch (Get-DbStateQuerySet $HouseholdId "full")
+    return Convert-DbRowSetsToState $rows
+}
+
+function Get-DbStateSummary($HouseholdId = $DefaultHouseholdId) {
+    Initialize-Database
+    $rows = Invoke-PsqlCsvBatch (Get-DbStateQuerySet $HouseholdId "summary")
+    return Convert-DbRowSetsToState $rows
+}
+
+function Get-DbTaskProof($HouseholdId, $EntryId) {
+    Initialize-Database
     $hid = Sql-Literal $HouseholdId
-    $meta = Invoke-PsqlCsv "SELECT version, updated_at FROM app_version WHERE singleton = TRUE"
-    $householdRows = Invoke-PsqlCsv "SELECT name FROM households WHERE id = $hid LIMIT 1"
-    $settingsRows = Invoke-PsqlCsv "SELECT vacation_threshold, week_starts_on FROM settings WHERE household_id = $hid"
-    $memberRows = Invoke-PsqlCsv "SELECT id, name, emoji, restricted, role, color, xp, total_fatigue, completed_tasks, stickers, on_vacation FROM household_members WHERE household_id = $hid ORDER BY sort_order, created_at, id"
-    $accountRows = Invoke-PsqlCsv "SELECT u.account_id, u.display_name, u.is_admin, hm.id AS member_id FROM users u LEFT JOIN household_members hm ON hm.user_id = u.id AND hm.household_id = $hid WHERE u.active = TRUE ORDER BY u.account_id"
-    $choreRows = Invoke-PsqlCsv "SELECT id, name, emoji, fatigue, xp, category FROM chores WHERE household_id = $hid ORDER BY sort_order, created_at, id"
-    $historyRows = Invoke-PsqlCsv "SELECT id, member_id, chore_id, chore_name, chore_emoji, category, fatigue_added, xp_earned, verification_status, proof_image, proof_caption, proof_analysis, review_note, completed_at_ms FROM task_entries WHERE household_id = $hid ORDER BY completed_at_ms, id"
-    $approvalRows = Invoke-PsqlCsv "SELECT entry_id, reviewer_id, status, reviewed_at_ms, review_note FROM task_approvals WHERE household_id = $hid ORDER BY entry_id, reviewer_id"
-    $recipientRows = Invoke-PsqlCsv "SELECT entry_id, member_id FROM task_point_recipients WHERE household_id = $hid ORDER BY entry_id, member_id"
-    $messageRows = Invoke-PsqlCsv "SELECT id, from_member_id, to_member_id, text, sent_at_ms FROM messages WHERE household_id = $hid ORDER BY sent_at_ms, id"
-    $badgeRows = Invoke-PsqlCsv "SELECT id, member_id, badge_id, name, emoji, earned_at_ms FROM badge_history WHERE household_id = $hid ORDER BY earned_at_ms, id"
-    $memberBadgeRows = Invoke-PsqlCsv "SELECT member_id, badge_id FROM member_badges WHERE household_id = $hid ORDER BY earned_at_ms, badge_id"
-    $careItemRows = Invoke-PsqlCsv "SELECT id, name, emoji, points, xp, locked FROM care_items WHERE household_id = $hid ORDER BY sort_order, created_at, id"
-    $assignmentRows = Invoke-PsqlCsv "SELECT date_key, morning_id, evening_id, updated_at_ms FROM care_assignments WHERE household_id = $hid ORDER BY date_key"
-    $careRows = Invoke-PsqlCsv "SELECT id, date_key, member_id, care_item_id, child_member_id, points, xp_earned, start_time, end_time, minutes, note, created_at_ms FROM care_sessions WHERE household_id = $hid ORDER BY date_key, start_time, id"
-    $careRecipientRows = Invoke-PsqlCsv "SELECT session_id, member_id FROM care_session_point_recipients WHERE household_id = $hid ORDER BY session_id, member_id"
-    $planRows = Invoke-PsqlCsv "SELECT id, from_member_id, to_member_id, chore_id, title, target_date, note, status, request_status, decline_reason, responded_at_ms, created_at_ms FROM tomorrow_plans WHERE household_id = $hid ORDER BY created_at_ms, id"
-    $changeRows = Invoke-PsqlCsv "SELECT id, type, before_json::text AS before_json, after_json::text AS after_json, requested_by, requested_at_ms, status, reviewed_at_ms, review_note, applied_at_ms FROM change_requests WHERE household_id = $hid ORDER BY requested_at_ms, id"
-    $changeApprovalRows = Invoke-PsqlCsv "SELECT request_id, reviewer_id, status, reviewed_at_ms, review_note FROM change_request_approvals WHERE household_id = $hid ORDER BY request_id, reviewer_id"
-
-    $earnedByMember = @{}
-    foreach ($row in $memberBadgeRows) {
-        if (-not $earnedByMember.ContainsKey($row.member_id)) { $earnedByMember[$row.member_id] = @() }
-        $earnedByMember[$row.member_id] += $row.badge_id
-    }
-
-    $approvalsByEntry = @{}
-    foreach ($row in $approvalRows) {
-        if (-not $approvalsByEntry.ContainsKey($row.entry_id)) { $approvalsByEntry[$row.entry_id] = @() }
-        $approvalsByEntry[$row.entry_id] += [pscustomobject]@{
-            reviewerId = $row.reviewer_id
-            status = $row.status
-            reviewedAt = Convert-CsvNullableLong $row.reviewed_at_ms
-            reviewNote = $row.review_note
-        }
-    }
-
-    $recipientsByEntry = @{}
-    foreach ($row in $recipientRows) {
-        if (-not $recipientsByEntry.ContainsKey($row.entry_id)) { $recipientsByEntry[$row.entry_id] = @() }
-        $recipientsByEntry[$row.entry_id] += $row.member_id
-    }
-
-    $careRecipientsBySession = @{}
-    foreach ($row in $careRecipientRows) {
-        if (-not $careRecipientsBySession.ContainsKey($row.session_id)) { $careRecipientsBySession[$row.session_id] = @() }
-        $careRecipientsBySession[$row.session_id] += $row.member_id
-    }
-
-    $approvalsByChange = @{}
-    foreach ($row in $changeApprovalRows) {
-        if (-not $approvalsByChange.ContainsKey($row.request_id)) { $approvalsByChange[$row.request_id] = @() }
-        $approvalsByChange[$row.request_id] += [pscustomobject]@{
-            reviewerId = $row.reviewer_id
-            status = $row.status
-            reviewedAt = Convert-CsvNullableLong $row.reviewed_at_ms
-            reviewNote = $row.review_note
-        }
-    }
-
-    $settings = if ($settingsRows.Count) {
-        @{ vacationThreshold = Convert-CsvInt $settingsRows[0].vacation_threshold; weekStartsOn = Convert-CsvInt $settingsRows[0].week_starts_on }
-    } else {
-        @{ vacationThreshold = 25; weekStartsOn = 1 }
-    }
-
-    $householdName = if ($householdRows.Count) { $householdRows[0].name } else { "ForHome" }
-
+    $eid = Sql-Literal $EntryId
+    $rows = Invoke-PsqlCsv "SELECT proof_image FROM task_entries WHERE household_id = $hid AND id = $eid LIMIT 1"
+    if ($rows.Count -eq 0) { throw "Task entry not found." }
     [pscustomobject]@{
-        version = if ($meta.Count) { Convert-CsvLong $meta[0].version } else { 0 }
-        updatedAt = if ($meta.Count) { $meta[0].updated_at } else { [DateTime]::UtcNow.ToString("o") }
-        householdName = $householdName
-        settings = $settings
-        members = @($memberRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.id; name = $_.name; emoji = $_.emoji; restricted = Convert-CsvBool $_.restricted; role = $_.role; color = $_.color
-                xp = Convert-CsvInt $_.xp; totalFatigue = Convert-CsvInt $_.total_fatigue; completedTasks = Convert-CsvInt $_.completed_tasks
-                stickers = Convert-CsvInt $_.stickers; onVacation = Convert-CsvBool $_.on_vacation
-                earnedBadges = if ($earnedByMember.ContainsKey($_.id)) { @($earnedByMember[$_.id]) } else { @() }
-            }
-        })
-        accounts = @($accountRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.account_id; password = "********"; displayName = $_.display_name
-                memberId = if ($_.member_id) { $_.member_id } else { $null }; isAdmin = Convert-CsvBool $_.is_admin
-            }
-        })
-        chores = @($choreRows | ForEach-Object {
-            [pscustomobject]@{ id = $_.id; name = $_.name; emoji = $_.emoji; fatigue = Convert-CsvInt $_.fatigue; xp = Convert-CsvInt $_.xp; category = $_.category }
-        })
-        history = @($historyRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.id; memberId = $_.member_id; choreId = $_.chore_id; choreName = $_.chore_name; choreEmoji = $_.chore_emoji; category = $_.category
-                fatigueAdded = Convert-CsvInt $_.fatigue_added; xpEarned = Convert-CsvInt $_.xp_earned; verificationStatus = $_.verification_status
-                proofImage = $_.proof_image; proofCaption = $_.proof_caption; proofAnalysis = $_.proof_analysis; reviewNote = $_.review_note
-                approvalRequests = if ($approvalsByEntry.ContainsKey($_.id)) { @($approvalsByEntry[$_.id]) } else { @() }
-                pointRecipients = if ($recipientsByEntry.ContainsKey($_.id)) { @($recipientsByEntry[$_.id]) } else { @($_.member_id) }
-                timestamp = Convert-CsvLong $_.completed_at_ms
-            }
-        })
-        messages = @($messageRows | ForEach-Object {
-            [pscustomobject]@{ id = $_.id; fromId = $_.from_member_id; toId = if ($_.to_member_id) { $_.to_member_id } else { $null }; text = $_.text; timestamp = Convert-CsvLong $_.sent_at_ms }
-        })
-        badgeHistory = @($badgeRows | ForEach-Object {
-            [pscustomobject]@{ id = $_.id; memberId = $_.member_id; badgeId = $_.badge_id; name = $_.name; emoji = $_.emoji; timestamp = Convert-CsvLong $_.earned_at_ms }
-        })
-        careItems = @($careItemRows | ForEach-Object {
-            [pscustomobject]@{ id = $_.id; name = $_.name; emoji = $_.emoji; points = Convert-CsvInt $_.points; xp = Convert-CsvInt $_.xp; locked = Convert-CsvBool $_.locked }
-        })
-        careAssignments = @($assignmentRows | ForEach-Object {
-            [pscustomobject]@{ date = $_.date_key; morningId = $_.morning_id; eveningId = $_.evening_id; updatedAt = Convert-CsvNullableLong $_.updated_at_ms }
-        })
-        careSessions = @($careRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.id; date = $_.date_key; memberId = $_.member_id; careItemId = $_.care_item_id; childMemberId = $_.child_member_id
-                pointRecipients = if ($careRecipientsBySession.ContainsKey($_.id)) { @($careRecipientsBySession[$_.id]) } else { @($_.member_id) }
-                points = Convert-CsvInt $_.points; xpEarned = Convert-CsvInt $_.xp_earned; startTime = $_.start_time; endTime = $_.end_time
-                minutes = Convert-CsvInt $_.minutes; note = $_.note; createdAt = Convert-CsvLong $_.created_at_ms
-            }
-        })
-        tomorrowPlans = @($planRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.id; fromId = $_.from_member_id; toId = $_.to_member_id; choreId = $_.chore_id; title = $_.title; targetDate = $_.target_date
-                note = $_.note; status = $_.status; requestStatus = $_.request_status; declineReason = $_.decline_reason
-                respondedAt = Convert-CsvNullableLong $_.responded_at_ms; createdAt = Convert-CsvLong $_.created_at_ms
-            }
-        })
-        changeRequests = @($changeRows | ForEach-Object {
-            [pscustomobject]@{
-                id = $_.id; type = $_.type; before = Convert-CsvJson $_.before_json; after = Convert-CsvJson $_.after_json; requestedBy = $_.requested_by
-                requestedAt = Convert-CsvLong $_.requested_at_ms; status = $_.status; reviewedAt = Convert-CsvNullableLong $_.reviewed_at_ms
-                reviewNote = $_.review_note; appliedAt = Convert-CsvNullableLong $_.applied_at_ms
-                approvalRequests = if ($approvalsByChange.ContainsKey($_.id)) { @($approvalsByChange[$_.id]) } else { @() }
-            }
-        })
+        entryId = $EntryId
+        proofImage = if ($rows[0].proof_image) { $rows[0].proof_image } else { "" }
+        hasProofImage = -not [string]::IsNullOrWhiteSpace([string]$rows[0].proof_image)
     }
 }
 

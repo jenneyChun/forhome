@@ -17,6 +17,34 @@ async function expectAppShellSoonAfterLogin(page) {
   expect(Date.now() - afterLogin).toBeLessThan(500);
 }
 
+test('test storage home content appears within 3s after login click', async ({ page }) => {
+  await page.goto('/?storage=test');
+  await fillLoginForm(page, 'admin', 'admin1234');
+  const clickAt = Date.now();
+  await page.getByTestId('login-submit').click();
+  await expect(page.getByTestId('section-home')).toBeVisible();
+  await expect(page.locator('#section-home .panel-title', { hasText: '오늘 요약' })).toBeVisible();
+  expect(Date.now() - clickAt).toBeLessThan(3000);
+});
+
+test('postgres summary loads home content within 3s after login API', async ({ page, request }) => {
+  test.setTimeout(60000);
+  const health = await request.get('/api/health');
+  const healthBody = await health.json();
+  test.skip(!healthBody.ok, 'PostgreSQL not available');
+
+  await page.goto('/');
+  await fillLoginForm(page, 'admin', 'admin1234');
+  const loginResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/auth/login') && response.ok()
+  );
+  await page.getByTestId('login-submit').click();
+  await loginResponse;
+  const afterLogin = Date.now();
+  await expect(page.locator('#section-home .panel-title', { hasText: '오늘 요약' })).toBeVisible({ timeout: 3000 });
+  expect(Date.now() - afterLogin).toBeLessThan(3000);
+});
+
 test('test storage login shows app shell within 500ms after click', async ({ page }) => {
   await page.goto('/?storage=test');
   await fillLoginForm(page, 'admin', 'admin1234');
@@ -73,5 +101,5 @@ test('postgres login screen hides before sync completes', async ({ page, request
   await loginResponse;
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await expect(page.getByTestId('login-screen')).toBeHidden();
-  await expect.poll(async () => page.locator('#syncStatus').textContent(), { timeout: 45000 }).toMatch(/동기화됨/);
+  await expect.poll(async () => page.locator('#syncStatus').textContent(), { timeout: 15000 }).toMatch(/동기화됨|요약 불러옴/);
 });

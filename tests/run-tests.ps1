@@ -127,7 +127,11 @@ Assert-True ($indexText -match "/api/auth/login") "client logs in through server
 Assert-True ($indexText -match "/api/state") "client reads and writes state through server API"
 Assert-True ($indexText -match "createTestStorageProvider") "client keeps Playwright storage mock"
 Assert-True ($indexText -notmatch "firebase\.initializeApp") "client no longer initializes Firebase"
-Assert-True ($indexText -match "loadStateInBackground") "client loads state in background after login"
+Assert-True ($serverText -match "/api/state/summary") "server exposes state summary API"
+Assert-True ($serverText -match "/api/state/version") "server exposes state version API"
+Assert-True ($serverText -match "/api/tasks/.*/proof") "server exposes task proof API"
+Assert-True ($indexText -match "loadSummaryThenFull") "client loads summary before full state"
+Assert-True ($dbText -match "Invoke-PsqlCsvBatch") "database layer batches PostgreSQL reads"
 Assert-True ($indexText -match 'data-testid="app-shell"') "client exposes app-shell test id for login navigation tests"
 
 Assert-True ($workflowText -match "PostgreSQL daily backup") "GitHub Actions backup is PostgreSQL-based"

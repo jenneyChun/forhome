@@ -228,6 +228,20 @@ function Send-ApiError($Client, $Status, $Code, $Message) {
     Send-Json $Client $Status @{ ok = $false; error = $Code; message = $Message }
 }
 
+function Get-QueryParam($Request, $Name) {
+    if ($Request.Path -notmatch "\?") { return $null }
+    $qs = ($Request.Path -split "\?", 2)[1]
+    foreach ($part in $qs.Split("&")) {
+        if ([string]::IsNullOrWhiteSpace($part)) { continue }
+        $kv = $part.Split("=", 2)
+        if ($kv[0] -eq $Name) {
+            if ($kv.Length -lt 2) { return "" }
+            return [System.Uri]::UnescapeDataString($kv[1])
+        }
+    }
+    return $null
+}
+
 function Handle-ApiRequest($Client, $Request, $PathOnly) {
     if ($Request.Method -eq "OPTIONS") {
         Send-Text $Client 204 "text/plain; charset=utf-8" ""
@@ -286,9 +300,36 @@ function Handle-ApiRequest($Client, $Request, $PathOnly) {
         return
     }
 
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/state/version") {
+        $session = Require-Session $Request
+        Send-Json $Client 200 (Get-DbStateVersion)
+        return
+    }
+
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/state/summary") {
+        $session = Require-Session $Request
+        Send-Json $Client 200 (Get-DbStateSummary $session.householdId)
+        return
+    }
+
     if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/state") {
         $session = Require-Session $Request
+        $sinceVersion = Get-QueryParam $Request "sinceVersion"
+        if ($sinceVersion) {
+            $current = Get-DbStateVersion
+            if ([int]$sinceVersion -eq [int]$current.version) {
+                Send-Json $Client 200 @{ unchanged = $true; version = $current.version; updatedAt = $current.updatedAt }
+                return
+            }
+        }
         Send-Json $Client 200 (Get-DbState $session.householdId)
+        return
+    }
+
+    if ($Request.Method -eq "GET" -and $PathOnly -match "^/api/tasks/([^/]+)/proof$") {
+        $session = Require-Session $Request
+        $entryId = [System.Uri]::UnescapeDataString($matches[1])
+        Send-Json $Client 200 @{ ok = $true; proof = (Get-DbTaskProof $session.householdId $entryId) }
         return
     }
 
