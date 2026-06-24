@@ -188,11 +188,13 @@ function Ensure-PostgresDatabase {
 }
 
 function Initialize-Database {
+    if ($script:DatabaseInitialized) { return }
     Load-DbConfig
     Ensure-PostgresDatabase
     if (-not (Test-Path $SchemaPath)) { throw "Schema file not found: $SchemaPath" }
     Invoke-PsqlText (Get-Content -Raw -Encoding UTF8 $SchemaPath) | Out-Null
     Ensure-DefaultUsers
+    $script:DatabaseInitialized = $true
 }
 
 function Convert-CsvBool($Value) {
@@ -325,6 +327,7 @@ function Get-DbState($HouseholdId = $DefaultHouseholdId) {
     Initialize-Database
     $hid = Sql-Literal $HouseholdId
     $meta = Invoke-PsqlCsv "SELECT version, updated_at FROM app_version WHERE singleton = TRUE"
+    $householdRows = Invoke-PsqlCsv "SELECT name FROM households WHERE id = $hid LIMIT 1"
     $settingsRows = Invoke-PsqlCsv "SELECT vacation_threshold, week_starts_on FROM settings WHERE household_id = $hid"
     $memberRows = Invoke-PsqlCsv "SELECT id, name, emoji, restricted, role, color, xp, total_fatigue, completed_tasks, stickers, on_vacation FROM household_members WHERE household_id = $hid ORDER BY sort_order, created_at, id"
     $accountRows = Invoke-PsqlCsv "SELECT u.account_id, u.display_name, u.is_admin, hm.id AS member_id FROM users u LEFT JOIN household_members hm ON hm.user_id = u.id AND hm.household_id = $hid WHERE u.active = TRUE ORDER BY u.account_id"
@@ -389,9 +392,12 @@ function Get-DbState($HouseholdId = $DefaultHouseholdId) {
         @{ vacationThreshold = 25; weekStartsOn = 1 }
     }
 
+    $householdName = if ($householdRows.Count) { $householdRows[0].name } else { "ForHome" }
+
     [pscustomobject]@{
         version = if ($meta.Count) { Convert-CsvLong $meta[0].version } else { 0 }
         updatedAt = if ($meta.Count) { $meta[0].updated_at } else { [DateTime]::UtcNow.ToString("o") }
+        householdName = $householdName
         settings = $settings
         members = @($memberRows | ForEach-Object {
             [pscustomobject]@{
@@ -402,7 +408,10 @@ function Get-DbState($HouseholdId = $DefaultHouseholdId) {
             }
         })
         accounts = @($accountRows | ForEach-Object {
-            [pscustomobject]@{ id = $_.account_id; password = "********"; memberId = if ($_.member_id) { $_.member_id } else { $null }; isAdmin = Convert-CsvBool $_.is_admin }
+            [pscustomobject]@{
+                id = $_.account_id; password = "********"; displayName = $_.display_name
+                memberId = if ($_.member_id) { $_.member_id } else { $null }; isAdmin = Convert-CsvBool $_.is_admin
+            }
         })
         chores = @($choreRows | ForEach-Object {
             [pscustomobject]@{ id = $_.id; name = $_.name; emoji = $_.emoji; fatigue = Convert-CsvInt $_.fatigue; xp = Convert-CsvInt $_.xp; category = $_.category }
@@ -462,7 +471,8 @@ function Set-DbState($JsonBody, $HouseholdId = $DefaultHouseholdId) {
     $settings = $state.settings
     $sql = New-Object System.Text.StringBuilder
     [void]$sql.AppendLine("BEGIN;")
-    [void]$sql.AppendLine("INSERT INTO households (id, name) VALUES ($hid, 'ForHome') ON CONFLICT (id) DO NOTHING;")
+    $householdName = if ($state.householdName) { [string]$state.householdName } else { "ForHome" }
+    [void]$sql.AppendLine("INSERT INTO households (id, name) VALUES ($hid, $(Sql-Literal $householdName)) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = now();")
     [void]$sql.AppendLine("DELETE FROM change_request_approvals WHERE household_id = $hid;")
     [void]$sql.AppendLine("DELETE FROM change_requests WHERE household_id = $hid;")
     [void]$sql.AppendLine("DELETE FROM tomorrow_plans WHERE household_id = $hid;")
@@ -752,4 +762,55 @@ COMMIT;
 "@
     Invoke-PsqlText $sql | Out-Null
     return New-DbSession $userId $invite.household_id
+}
+
+function Get-DbProfile($Session) {
+    Initialize-Database
+    if (-not $Session) { throw "Login is required." }
+    $userRows = Invoke-PsqlCsv "SELECT account_id, email, display_name FROM users WHERE id = $(Sql-Literal $Session.userId) LIMIT 1"
+    if ($userRows.Count -eq 0) { throw "User not found." }
+    $householdRows = Invoke-PsqlCsv "SELECT name FROM households WHERE id = $(Sql-Literal $Session.householdId) LIMIT 1"
+    $memberRows = Invoke-PsqlCsv "SELECT id, name, emoji FROM household_members WHERE household_id = $(Sql-Literal $Session.householdId) AND user_id = $(Sql-Literal $Session.userId) LIMIT 1"
+    [pscustomobject]@{
+        accountId = $userRows[0].account_id
+        email = $userRows[0].email
+        displayName = $userRows[0].display_name
+        householdName = if ($householdRows.Count) { $householdRows[0].name } else { "ForHome" }
+        memberId = if ($memberRows.Count) { $memberRows[0].id } else { $null }
+        memberName = if ($memberRows.Count) { $memberRows[0].name } else { $null }
+        memberEmoji = if ($memberRows.Count) { $memberRows[0].emoji } else { $null }
+        isAdmin = Convert-CsvBool $Session.isAdmin
+    }
+}
+
+function Update-DbProfile($Session, $Body) {
+    Initialize-Database
+    if (-not $Session) { throw "Login is required." }
+    $userRows = Invoke-PsqlCsv "SELECT id, account_id, password_hash, display_name FROM users WHERE id = $(Sql-Literal $Session.userId) LIMIT 1"
+    if ($userRows.Count -eq 0) { throw "User not found." }
+    $displayName = if ($Body.displayName) { [string]$Body.displayName.Trim() } else { $userRows[0].display_name }
+    if ([string]::IsNullOrWhiteSpace($displayName)) { throw "displayName is required." }
+    $sql = New-Object System.Text.StringBuilder
+    [void]$sql.AppendLine("BEGIN;")
+    if ($Body.password) {
+        $currentPassword = [string]$Body.currentPassword
+        if (-not (Test-PasswordHash $currentPassword $userRows[0].password_hash)) { throw "Current password is incorrect." }
+        $passwordHash = New-PasswordHash $Body.password
+        [void]$sql.AppendLine("UPDATE users SET password_hash = $(Sql-Literal $passwordHash), updated_at = now() WHERE id = $(Sql-Literal $Session.userId);")
+    }
+    [void]$sql.AppendLine("UPDATE users SET display_name = $(Sql-Literal $displayName), updated_at = now() WHERE id = $(Sql-Literal $Session.userId);")
+    if ($Body.householdName) {
+        $householdName = [string]$Body.householdName.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($householdName)) {
+            [void]$sql.AppendLine("UPDATE households SET name = $(Sql-Literal $householdName), updated_at = now() WHERE id = $(Sql-Literal $Session.householdId);")
+        }
+    }
+    $memberRows = Invoke-PsqlCsv "SELECT id FROM household_members WHERE household_id = $(Sql-Literal $Session.householdId) AND user_id = $(Sql-Literal $Session.userId) LIMIT 1"
+    if ($memberRows.Count) {
+        $mark = $displayName.Substring(0, [Math]::Min(2, $displayName.Length))
+        [void]$sql.AppendLine("UPDATE household_members SET name = $(Sql-Literal $displayName), emoji = $(Sql-Literal $mark), updated_at = now() WHERE household_id = $(Sql-Literal $Session.householdId) AND id = $(Sql-Literal $memberRows[0].id);")
+    }
+    [void]$sql.AppendLine("COMMIT;")
+    Invoke-PsqlText $sql.ToString() | Out-Null
+    return Get-DbProfile $Session
 }

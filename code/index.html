@@ -202,6 +202,7 @@
       max-width: 52vw;
     }
     .user-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .user-menu-wrap { position: relative; }
     .user-pill {
       border: 1px solid var(--line);
       background: #fffdf8;
@@ -214,6 +215,32 @@
       gap: 6px;
       max-width: 170px;
     }
+    .user-pill .chev { color: var(--muted); font-size: 10px; line-height: 1; }
+    .user-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 148px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffdf8;
+      box-shadow: var(--shadow);
+      padding: 6px;
+      z-index: 30;
+    }
+    .user-dropdown button {
+      width: 100%;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .user-dropdown button:hover { background: var(--blue-soft); color: var(--blue); }
+    .user-dropdown button.danger:hover { background: var(--red-soft); color: var(--red); }
     .layout {
       max-width: 1120px;
       margin: 0 auto;
@@ -796,12 +823,18 @@
         <div class="app-title">
           <div class="brand-mark" style="width:38px;height:38px;font-size:16px;">집</div>
           <div>
-            <strong>우리집 히어로</strong>
+            <strong id="familyName">우리집 히어로</strong>
             <div class="status-line" id="syncStatus">동기화 준비 중</div>
           </div>
         </div>
         <div class="user-area">
-          <button class="user-pill" id="currentUser" title="Logout"></button>
+          <div class="user-menu-wrap" id="userMenuWrap">
+            <button class="user-pill" id="currentUser" type="button" aria-haspopup="true" aria-expanded="false" title="계정 메뉴"></button>
+            <div class="user-dropdown" id="userDropdown" hidden>
+              <button type="button" id="profileSettingBtn" data-testid="profile-setting">설정</button>
+              <button type="button" class="danger" id="profileLogoutBtn" data-testid="profile-logout">로그아웃</button>
+            </div>
+          </div>
           <button class="btn icon" id="reloadButton" title="Refresh">R</button>
         </div>
       </div>
@@ -822,6 +855,7 @@
         <section class="section" id="section-calendar" data-testid="section-calendar"></section>
         <section class="section" id="section-badges" data-testid="section-badges"></section>
         <section class="section" id="section-settings" data-testid="section-settings"></section>
+        <section class="section" id="section-account" data-testid="section-account"></section>
       </main>
     </div>
   </section>
@@ -860,6 +894,7 @@
     const defaultState = () => ({
       version: 0,
       updatedAt: new Date().toISOString(),
+      householdName: '우리집 히어로',
       settings: { vacationThreshold: 25, weekStartsOn: 1 },
       members: [
         memberSeed('mom', '엄마', '엄', true, '#ef4444'),
@@ -916,6 +951,8 @@
     let saving = false;
     let storageProvider = null;
     let unsubscribeState = null;
+    let profileMenuOpen = false;
+    let accountProfile = null;
 
     const $ = (id) => document.getElementById(id);
     const money = new Intl.NumberFormat('en-US');
@@ -924,7 +961,10 @@
     $('loginButton').addEventListener('click', doLogin);
     $('signupButton').addEventListener('click', () => toast('회원가입 기능은 준비 중입니다.'));
     $('loginPw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-    $('currentUser').addEventListener('click', logout);
+    $('currentUser').addEventListener('click', (e) => { e.stopPropagation(); toggleProfileMenu(); });
+    $('profileSettingBtn').addEventListener('click', (e) => { e.stopPropagation(); closeProfileMenu(); openAccountSettings(); });
+    $('profileLogoutBtn').addEventListener('click', (e) => { e.stopPropagation(); closeProfileMenu(); logout(); });
+    document.addEventListener('click', (e) => { if (profileMenuOpen && !$('userMenuWrap').contains(e.target)) closeProfileMenu(); });
     $('reloadButton').addEventListener('click', hardReload);
     $('closeDialog').addEventListener('click', () => $('successOverlay').hidden = true);
     document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
@@ -977,6 +1017,38 @@
         },
         getCurrentAccountId() {
           return this.getCurrentSession()?.accountId || null;
+        },
+        async getProfile() {
+          const acc = account(this.getCurrentSession()?.accountId);
+          const m = member(acc?.memberId);
+          return {
+            accountId: acc?.id || '',
+            displayName: acc?.displayName || m?.name || acc?.id || '',
+            householdName: state.householdName || '우리집 히어로',
+            memberEmoji: m?.emoji || 'AD',
+            isAdmin: !!acc?.isAdmin
+          };
+        },
+        async updateProfile(body) {
+          const acc = account(this.getCurrentSession()?.accountId);
+          if (!acc) throw new Error('로그인이 필요합니다.');
+          if (body.displayName) {
+            acc.displayName = body.displayName.trim();
+            if (acc.memberId) {
+              const m = member(acc.memberId);
+              if (m) {
+                m.name = body.displayName.trim();
+                m.emoji = body.displayName.trim().slice(0, 2);
+              }
+            }
+          }
+          if (body.householdName) state.householdName = body.householdName.trim();
+          if (body.password) {
+            if (acc.password !== body.currentPassword) throw new Error('현재 비밀번호가 올바르지 않습니다.');
+            acc.password = body.password;
+          }
+          await this.saveState(state);
+          return this.getProfile();
         }
       };
     }
@@ -1068,6 +1140,14 @@
         },
         getCurrentAccountId() {
           return currentSession?.accountId || null;
+        },
+        async getProfile() {
+          const result = await apiJson('/api/profile');
+          return result.profile;
+        },
+        async updateProfile(body) {
+          const result = await apiJson('/api/profile', { method: 'PATCH', body });
+          return result.profile;
         }
       };
     }
@@ -1195,15 +1275,24 @@
       const pw = $('loginPw').value;
       $('loginButton').disabled = true;
       $('signupButton').disabled = true;
-      $('loginError').textContent = '';
+      $('loginError').textContent = '로그인 중...';
       try {
         session = await storageProvider.login(id, pw);
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        showApp();
+        setStatus('데이터 불러오는 중...');
         await loadState({ seedIfMissing: session.isAdmin });
         startStateSubscription();
-        showApp();
       } catch (err) {
-        $('loginError').textContent = err.message || '로그인에 실패했습니다.';
+        const message = err.message || '로그인에 실패했습니다.';
+        if ($('appShell').hidden) {
+          $('loginError').textContent = message;
+        } else {
+          showLogin();
+          session = null;
+          sessionStorage.removeItem(SESSION_KEY);
+          $('loginError').textContent = message;
+        }
       } finally {
         $('loginButton').disabled = false;
         $('signupButton').disabled = false;
@@ -1211,6 +1300,7 @@
     }
 
     async function logout() {
+      closeProfileMenu();
       if (unsubscribeState) {
         unsubscribeState();
         unsubscribeState = null;
@@ -1218,16 +1308,55 @@
       sessionStorage.removeItem(SESSION_KEY);
       try { await storageProvider.logout(); } catch {}
       session = null;
+      accountProfile = null;
       state = normalizeState(defaultState());
       showLogin();
     }
-    function showLogin() { $('loginScreen').hidden = false; $('appShell').hidden = true; }
+    function showLogin() { $('loginScreen').hidden = false; $('appShell').hidden = true; closeProfileMenu(); }
+
+    function familyDisplayName() {
+      const name = String(state.householdName || '').trim();
+      if (!name || name === 'ForHome') return '우리집 히어로';
+      return name;
+    }
+
+    function updateHeader() {
+      $('familyName').textContent = familyDisplayName();
+      const acc = account(session?.accountId);
+      const m = member(acc?.memberId);
+      const mark = m?.emoji || (acc?.displayName || acc?.id || 'AD').slice(0, 2).toUpperCase();
+      const label = acc?.id || 'user';
+      $('currentUser').innerHTML = `${escapeHtml(mark)} <span class="ellipsis">${escapeHtml(label)}</span> <span class="chev" aria-hidden="true">▾</span>`;
+    }
+
+    function toggleProfileMenu(forceOpen) {
+      profileMenuOpen = typeof forceOpen === 'boolean' ? forceOpen : !profileMenuOpen;
+      $('userDropdown').hidden = !profileMenuOpen;
+      $('currentUser').setAttribute('aria-expanded', profileMenuOpen ? 'true' : 'false');
+    }
+
+    function closeProfileMenu() {
+      if (!profileMenuOpen) return;
+      toggleProfileMenu(false);
+    }
+
+    async function openAccountSettings() {
+      activeTab = 'account';
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === 'section-account'));
+      try {
+        accountProfile = await storageProvider.getProfile();
+      } catch (err) {
+        accountProfile = null;
+        toast(`계정 정보를 불러오지 못했습니다: ${err.message}`);
+      }
+      render();
+    }
+
     function showApp() {
       $('loginScreen').hidden = true;
       $('appShell').hidden = false;
-      const acc = account(session.accountId);
-      const m = member(acc?.memberId);
-      $('currentUser').innerHTML = `${escapeHtml(m?.emoji || 'AD')} <span class="ellipsis">${escapeHtml(acc?.id || 'user')}</span>`;
+      updateHeader();
       if (!selectedMemberId) selectedMemberId = firstAllowedMember()?.id || state.members[0]?.id;
       if (!badgeMemberId) badgeMemberId = selectedMemberId || state.members[0]?.id;
       render();
@@ -1247,6 +1376,8 @@
       if (activeTab === 'calendar') renderCalendar();
       if (activeTab === 'badges') renderBadges();
       if (activeTab === 'settings') renderSettings();
+      if (activeTab === 'account') renderAccount();
+      updateHeader();
     }
 
     function renderMemberRow(m) {
@@ -1593,6 +1724,7 @@
       const base = defaultState();
       const merged = { ...base, ...(next || {}) };
       merged.settings = { ...base.settings, ...(next?.settings || {}) };
+      merged.householdName = String(next?.householdName || base.householdName || '우리집 히어로').trim() || '우리집 히어로';
       merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m, role: m.role || (m.id === 'son' ? 'child' : 'adult') })) : base.members;
       merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
       base.chores.forEach(seed => {
@@ -2010,6 +2142,62 @@
             <div class="list" style="margin-top:10px;">${state.accounts.map(renderAccountSetting).join('')}</div>
           </div>
         </div>`;
+    }
+
+    function renderAccount() {
+      const profile = accountProfile || {};
+      const acc = account(session?.accountId);
+      const displayName = profile.displayName || acc?.displayName || acc?.id || '';
+      const householdName = profile.householdName || state.householdName || '';
+      $('section-account').innerHTML = `
+        <div class="grid">
+          <div class="panel span-6">
+            <div class="panel-head">
+              <div class="panel-title">내 계정</div>
+              <button class="btn" type="button" onclick="showTab('home')">돌아가기</button>
+            </div>
+            <div class="form-grid">
+              <div class="field col-12"><label>아이디</label><input id="accountEditId" value="${escapeHtml(profile.accountId || acc?.id || '')}" readonly></div>
+              <div class="field col-12"><label>표시 이름</label><input id="accountEditDisplayName" data-testid="account-display-name" value="${escapeHtml(displayName)}" placeholder="표시 이름"></div>
+              <div class="field col-12"><label>가족 이름</label><input id="accountEditHouseholdName" data-testid="account-household-name" value="${escapeHtml(householdName === 'ForHome' ? '' : householdName)}" placeholder="우리집 히어로"></div>
+              <div class="field col-12"><label>현재 비밀번호</label><input id="accountEditCurrentPw" data-testid="account-current-password" type="password" autocomplete="current-password" placeholder="비밀번호 변경 시 입력"></div>
+              <div class="field col-12"><label>새 비밀번호</label><input id="accountEditNewPw" data-testid="account-new-password" type="password" autocomplete="new-password" placeholder="변경하지 않으면 비워두세요"></div>
+              <button class="btn primary col-12" data-testid="account-save" type="button" onclick="saveAccountProfile()">저장</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function saveAccountProfile() {
+      const displayName = $('accountEditDisplayName').value.trim();
+      const householdName = $('accountEditHouseholdName').value.trim();
+      const currentPassword = $('accountEditCurrentPw').value;
+      const password = $('accountEditNewPw').value;
+      if (!displayName) return toast('표시 이름을 입력해 주세요');
+      if (password && !currentPassword) return toast('현재 비밀번호를 입력해 주세요');
+      const body = { displayName };
+      if (householdName) body.householdName = householdName;
+      if (password) {
+        body.currentPassword = currentPassword;
+        body.password = password;
+      }
+      try {
+        accountProfile = await storageProvider.updateProfile(body);
+        if (householdName) state.householdName = householdName;
+        else if (accountProfile.householdName) state.householdName = accountProfile.householdName;
+        if (TEST_MODE) await loadState();
+        else {
+          state = normalizeState(await storageProvider.loadState());
+          setStatus(`동기화됨 v${state.version || 0}`);
+        }
+        $('accountEditCurrentPw').value = '';
+        $('accountEditNewPw').value = '';
+        updateHeader();
+        renderAccount();
+        toast('계정 정보를 저장했습니다');
+      } catch (err) {
+        toast(err.message || '계정 정보 저장에 실패했습니다');
+      }
     }
 
     function renderActivity(entry) {

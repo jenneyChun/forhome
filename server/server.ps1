@@ -273,6 +273,19 @@ function Handle-ApiRequest($Client, $Request, $PathOnly) {
         return
     }
 
+    if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/profile") {
+        $session = Require-Session $Request
+        Send-Json $Client 200 @{ ok = $true; profile = (Get-DbProfile $session) }
+        return
+    }
+
+    if (($Request.Method -eq "PUT" -or $Request.Method -eq "PATCH" -or $Request.Method -eq "POST") -and $PathOnly -eq "/api/profile") {
+        $session = Require-Session $Request
+        $body = Read-JsonBody $Request
+        Send-Json $Client 200 @{ ok = $true; profile = (Update-DbProfile $session $body) }
+        return
+    }
+
     if ($Request.Method -eq "GET" -and $PathOnly -eq "/api/state") {
         $session = Require-Session $Request
         Send-Json $Client 200 (Get-DbState $session.householdId)
