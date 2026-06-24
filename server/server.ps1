@@ -38,7 +38,11 @@ function New-HeaderText($Status, $ContentType, $Length, $ExtraHeaders) {
     $lines.Add("HTTP/1.1 $Status $reason")
     if ($ContentType) { $lines.Add("Content-Type: $ContentType") }
     $lines.Add("Content-Length: $Length")
-    $lines.Add("Access-Control-Allow-Origin: http://localhost:$Port")
+    $origin = "http://localhost:$Port"
+    if ($script:RequestOrigin -and $script:AllowedOrigins -contains $script:RequestOrigin) {
+        $origin = $script:RequestOrigin
+    }
+    $lines.Add("Access-Control-Allow-Origin: $origin")
     $lines.Add("Access-Control-Allow-Credentials: true")
     $lines.Add("Access-Control-Allow-Headers: Content-Type")
     $lines.Add("Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS")
@@ -313,22 +317,146 @@ function Get-LocalIPv4 {
     return "127.0.0.1"
 }
 
-$listener = New-Object System.Net.Sockets.TcpListener -ArgumentList ([System.Net.IPAddress]::Any), $Port
-$listener.Start()
+function Stop-ProcessTree {
+    param([int]$ProcessId)
+
+    if (-not $ProcessId -or $ProcessId -eq $PID) { return }
+    Get-CimInstance Win32_Process -Filter "ParentProcessId=$ProcessId" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-ProcessTree -ProcessId $_.ProcessId }
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    cmd /c "taskkill /PID $ProcessId /F /T >nul 2>nul"
+}
+
+function Stop-PortOwner {
+    param([int]$OwnerPid)
+
+    if (-not $OwnerPid -or $OwnerPid -eq $PID) { return }
+    $proc = Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue
+    if ($proc) {
+        Write-Host "Stopping $($proc.ProcessName) (PID $OwnerPid)..."
+        Write-AppLog "stopping process $OwnerPid ($($proc.ProcessName))"
+        Stop-ProcessTree -ProcessId $OwnerPid
+        return
+    }
+
+    Write-Host "Port owner PID $OwnerPid not found; stopping child processes..."
+    Write-AppLog "port owner pid $OwnerPid not found; stopping children"
+    Get-CimInstance Win32_Process -Filter "ParentProcessId=$OwnerPid" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Write-Host "  stopping child $($_.ProcessId) $($_.Name)"
+            Write-AppLog "stopping child $($_.ProcessId) $($_.Name) of ghost pid $OwnerPid"
+            Stop-ProcessTree -ProcessId $_.ProcessId
+        }
+    cmd /c "taskkill /PID $OwnerPid /F /T >nul 2>nul"
+}
+
+function Clear-PortListener {
+    param([int]$Port)
+
+    $currentPid = $PID
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ProcessId -ne $currentPid -and
+                $_.CommandLine -match 'server\.ps1' -and
+                $_.CommandLine -match "-Port\s+$Port\b"
+            } |
+            ForEach-Object {
+                Write-Host "Stopping leftover server process (PID $($_.ProcessId))..."
+                Write-AppLog "stopping leftover server process $($_.ProcessId)"
+                Stop-ProcessTree -ProcessId $_.ProcessId
+            }
+
+        $relatedPids = @(Get-NetTCPConnection -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalPort -eq $Port -or $_.RemotePort -eq $Port } |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            Where-Object { $_ -and $_ -ne $currentPid })
+        foreach ($ownerPid in $relatedPids) {
+            Stop-PortOwner -OwnerPid $ownerPid
+        }
+
+        Start-Sleep -Milliseconds (250 * $attempt)
+        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+            return
+        }
+    }
+}
+
+function Start-ServerListeners {
+    param([int]$Port, [string]$LanIP)
+
+    Clear-PortListener -Port $Port
+
+    $listeners = New-Object System.Collections.Generic.List[System.Net.Sockets.TcpListener]
+    try {
+        $anyListener = New-Object System.Net.Sockets.TcpListener -ArgumentList ([System.Net.IPAddress]::Any), $Port
+        $anyListener.Start()
+        $listeners.Add($anyListener) | Out-Null
+        Write-AppLog "listening on 0.0.0.0:$Port"
+        return $listeners
+    } catch {
+        Write-Host "Could not bind 0.0.0.0:$Port ($($_.Exception.Message)); trying per-interface bind..."
+        Write-AppLog "bind 0.0.0.0:$Port failed: $_"
+    }
+
+    foreach ($addrText in @($LanIP, "127.0.0.1")) {
+        if ($listeners | Where-Object {
+            $ep = $_.LocalEndpoint
+            $ep.Address.ToString() -eq $addrText -and $ep.Port -eq $Port
+        }) { continue }
+        try {
+            $ipAddress = [System.Net.IPAddress]::Parse($addrText)
+            $listener = New-Object System.Net.Sockets.TcpListener -ArgumentList $ipAddress, $Port
+            $listener.Start()
+            $listeners.Add($listener) | Out-Null
+            Write-Host "Listening on http://${addrText}:$Port"
+            Write-AppLog "listening on ${addrText}:$Port"
+        } catch {
+            Write-Host "Could not bind ${addrText}:$Port ($($_.Exception.Message))"
+            Write-AppLog "bind ${addrText}:$Port failed: $_"
+        }
+    }
+
+    if ($listeners.Count -eq 0) {
+        throw "Port $Port is still in use. Close the process holding it or reboot to clear a stale listener."
+    }
+    return $listeners
+}
+
 $ip = Get-LocalIPv4
+$script:AllowedOrigins = @(
+    "http://localhost:$Port",
+    "http://127.0.0.1:$Port",
+    "http://${ip}:$Port"
+)
+$listeners = Start-ServerListeners -Port $Port -LanIP $ip
 Write-Host ""
 Write-Host "ForHome PostgreSQL API server is running."
 Write-Host "PC:     http://localhost:$Port"
-Write-Host "Mobile: http://$ip`:$Port"
+Write-Host "LAN:    http://$ip`:$Port"
 Write-Host "DB:     PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD or data\db.env.ps1"
 Write-Host "Stop:   Ctrl + C"
 Write-Host ""
-Write-AppLog "postgresql api server started on port $Port"
+Write-AppLog "postgresql api server started on port $Port (listeners=$($listeners.Count))"
 
+try {
 while ($true) {
-    $client = $listener.AcceptTcpClient()
+    $client = $null
+    while (-not $client) {
+        foreach ($listener in $listeners) {
+            if ($listener.Pending()) {
+                $client = $listener.AcceptTcpClient()
+                break
+            }
+        }
+        if (-not $client) { Start-Sleep -Milliseconds 25 }
+    }
     try {
         $request = Read-HttpRequest $client
+        $script:RequestOrigin = $null
+        if ($request.Headers.ContainsKey("origin")) {
+            $script:RequestOrigin = $request.Headers["origin"]
+        }
         $pathOnly = ($request.Path -split "\?")[0]
         if ($pathOnly.StartsWith("/api/")) {
             try {
@@ -343,9 +471,12 @@ while ($true) {
                 } elseif ($message -match "permission") {
                     $status = 403
                     $code = "forbidden"
-                } elseif ($message -match "not found") {
+                } elseif ($message -match "(?<!was )not found(?!\. Install PostgreSQL)") {
                     $status = 404
                     $code = "not_found"
+                } elseif ($message -match "password authentication failed|no password supplied|Cannot connect to PostgreSQL|psql was not found") {
+                    $status = 503
+                    $code = "database_unavailable"
                 } elseif ($message -match "password|JSON body|required|invalid|expired|used|revoked") {
                     $status = 400
                     $code = "bad_request"
@@ -365,4 +496,10 @@ while ($true) {
     } finally {
         $client.Close()
     }
+}
+} finally {
+    foreach ($listener in $listeners) {
+        try { $listener.Stop() } catch {}
+    }
+    Write-AppLog "server stopped on port $Port"
 }
