@@ -25,7 +25,7 @@ function Assert-Dir($RelativePath) {
 
 Write-Host "ForHome PostgreSQL API, backup, and structure tests"
 
-@("code", "server", "server\sql", "data", "data\exports", "log", "docs", "docs\session", "scripts", "tests", "tests\e2e", "tests\fixtures", "tests\powershell", ".github", ".github\workflows") |
+@("code", "server", "server\sql", "data", "data\exports", "log", "docs", "docs\session", "scripts", "tests", "tests\e2e", "tests\fixtures", "tests\powershell", "Report", "Prompting", ".github", ".github\workflows") |
     ForEach-Object { Assert-Dir $_ }
 
 @(
@@ -47,7 +47,9 @@ Write-Host "ForHome PostgreSQL API, backup, and structure tests"
     "docs\codex-kakao-notify.ko.md",
     "tests\playwright.config.js",
     "tests\e2e\app.spec.js",
-    "tests\fixtures\backup-state.json"
+    "tests\e2e\login-navigation.spec.js",
+    "tests\fixtures\backup-state.json",
+    "tests\powershell\login-performance.ps1"
 ) | ForEach-Object { Assert-File $_ }
 
 Assert-MissingFile "scripts\firestore-backup.js"
@@ -125,7 +127,8 @@ Assert-True ($indexText -match "/api/auth/login") "client logs in through server
 Assert-True ($indexText -match "/api/state") "client reads and writes state through server API"
 Assert-True ($indexText -match "createTestStorageProvider") "client keeps Playwright storage mock"
 Assert-True ($indexText -notmatch "firebase\.initializeApp") "client no longer initializes Firebase"
-Assert-True ($indexText -notmatch "FIRESTORE_STATE_PATH") "client no longer targets Firestore state document"
+Assert-True ($indexText -match "loadStateInBackground") "client loads state in background after login"
+Assert-True ($indexText -match 'data-testid="app-shell"') "client exposes app-shell test id for login navigation tests"
 
 Assert-True ($workflowText -match "PostgreSQL daily backup") "GitHub Actions backup is PostgreSQL-based"
 Assert-True ($workflowText -match "PGHOST") "GitHub Actions reads PostgreSQL connection secrets"
@@ -150,6 +153,10 @@ Assert-True (Test-Path (Join-Path $dryRunDir "morning_briefing.json")) "briefing
 if ($env:RUN_DB_TESTS -eq "1") {
     $health = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& { . '$repoRoot\server\db.ps1'; Get-DbHealth | ConvertTo-Json -Compress }"
     Assert-True ($health -match '"storage":"postgresql"') "live PostgreSQL health returns PostgreSQL storage"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tests\powershell\login-performance.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add("login-performance.ps1 failed")
+    }
 } else {
     Write-Host "SKIP live PostgreSQL checks because RUN_DB_TESTS is not 1."
 }

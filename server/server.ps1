@@ -450,6 +450,13 @@ $script:AllowedOrigins = @(
     "http://127.0.0.1:$Port",
     "http://${ip}:$Port"
 )
+try {
+    Initialize-Database
+    Write-Host "Database ready."
+} catch {
+    Write-Host "Database warm-up failed: $_"
+    Write-Host "Configure data\db.env.ps1 and run npm run setup:db if login is slow or fails."
+}
 $listeners = Start-ServerListeners -Port $Port -LanIP $ip
 Write-Host ""
 Write-Host "ForHome PostgreSQL API server is running."

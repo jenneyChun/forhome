@@ -186,21 +186,30 @@
       justify-content: space-between;
       gap: 12px;
     }
+    #appShell { position: relative; }
+    #appShell[data-loading="true"] .content { opacity: .55; pointer-events: none; }
+    .app-loading {
+      position: absolute;
+      inset: 56px 0 0;
+      z-index: 15;
+      display: grid;
+      place-items: start center;
+      padding-top: 24px;
+      pointer-events: none;
+    }
+    .app-loading-box {
+      background: rgba(255, 250, 243, .96);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--muted);
+      box-shadow: 0 4px 16px rgba(61, 43, 31, .08);
+    }
     .app-title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
       min-width: 0;
     }
     .app-title strong { display: block; font-size: 17px; white-space: nowrap; }
-    .status-line {
-      color: var(--muted);
-      font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 52vw;
-    }
     .user-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .user-menu-wrap { position: relative; }
     .user-pill {
@@ -214,6 +223,7 @@
       align-items: center;
       gap: 6px;
       max-width: 170px;
+      cursor: pointer;
     }
     .user-pill .chev { color: var(--muted); font-size: 10px; line-height: 1; }
     .user-dropdown {
@@ -653,9 +663,6 @@
     html[data-surface="mobile"] .app-title strong {
       font-size: 15px;
     }
-    html[data-surface="mobile"] .status-line {
-      max-width: 42vw;
-    }
     html[data-surface="mobile"] .layout {
       grid-template-columns: 1fr;
       padding: 10px 10px 96px;
@@ -797,7 +804,7 @@
   </style>
 </head>
 <body>
-  <section class="login-screen" id="loginScreen">
+  <section class="login-screen" id="loginScreen" data-testid="login-screen">
     <div class="login-box">
       <h1 class="login-title">우리집 히어로</h1>
       <p class="login-server-status" id="loginServerText" aria-live="polite">저장소 연결 확인 중</p>
@@ -817,22 +824,19 @@
     </div>
   </section>
 
-  <section class="app-shell" id="appShell" hidden>
+  <section class="app-shell" id="appShell" data-testid="app-shell" hidden>
     <header class="topbar">
       <div class="topbar-inner">
         <div class="app-title">
-          <div class="brand-mark" style="width:38px;height:38px;font-size:16px;">집</div>
-          <div>
-            <strong id="familyName">우리집 히어로</strong>
-            <div class="status-line" id="syncStatus">동기화 준비 중</div>
-          </div>
+          <strong id="familyName">우리집 히어로</strong>
         </div>
+        <span id="syncStatus" hidden aria-live="polite"></span>
         <div class="user-area">
           <div class="user-menu-wrap" id="userMenuWrap">
             <button class="user-pill" id="currentUser" type="button" aria-haspopup="true" aria-expanded="false" title="계정 메뉴"></button>
             <div class="user-dropdown" id="userDropdown" hidden>
-              <button type="button" id="profileSettingBtn" data-testid="profile-setting">설정</button>
-              <button type="button" class="danger" id="profileLogoutBtn" data-testid="profile-logout">로그아웃</button>
+              <button type="button" id="profileSettingBtn" data-testid="profile-setting">settings</button>
+              <button type="button" class="danger" id="profileLogoutBtn" data-testid="profile-logout">logout</button>
             </div>
           </div>
           <button class="btn icon" id="reloadButton" title="Refresh">R</button>
@@ -850,6 +854,9 @@
       </nav>
 
       <main class="content">
+        <div class="app-loading" id="appLoading" data-testid="app-loading" hidden>
+          <div class="app-loading-box">데이터 불러오는 중...</div>
+        </div>
         <section class="section active" id="section-home" data-testid="section-home"></section>
         <section class="section" id="section-tasks" data-testid="section-tasks"></section>
         <section class="section" id="section-calendar" data-testid="section-calendar"></section>
@@ -949,6 +956,7 @@
     let calendarMonth = new Date();
     let selectedDate = dateKey(nowMs());
     let saving = false;
+    let stateLoading = false;
     let storageProvider = null;
     let unsubscribeState = null;
     let profileMenuOpen = false;
@@ -984,7 +992,15 @@
         async login(accountId, password) {
           const acc = defaultState().accounts.find(a => a.id === accountId && a.password === password);
           if (!acc) throw new Error('아이디와 비밀번호를 확인해 주세요.');
-          return { accountId: acc.id, memberId: acc.memberId, isAdmin: !!acc.isAdmin };
+          const m = defaultState().members.find(member => member.id === acc.memberId);
+          return {
+            accountId: acc.id,
+            memberId: acc.memberId,
+            isAdmin: !!acc.isAdmin,
+            displayName: acc.displayName || acc.id,
+            householdName: defaultState().householdName || '우리집 히어로',
+            memberEmoji: m?.emoji || (acc.displayName || acc.id).slice(0, 2).toUpperCase()
+          };
         },
         async logout() {},
         async loadState() {
@@ -1162,9 +1178,10 @@
         session = storageProvider.getCurrentSession();
         if (session) {
           sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-          await loadState({ seedIfMissing: session.isAdmin });
-          startStateSubscription();
+          applySessionBootstrap(session);
           showApp();
+          startStateSubscription();
+          loadStateInBackground({ seedIfMissing: session.isAdmin });
         } else {
           sessionStorage.removeItem(SESSION_KEY);
           showLogin();
@@ -1182,6 +1199,7 @@
         state = normalizeState(await storageProvider.loadState(options));
         $('loginServerText').textContent = `${storageProvider.label} connected`;
         setStatus(`동기화됨 v${state.version || 0}`);
+        render();
       } catch (err) {
         state = normalizeState(defaultState());
         $('loginServerText').textContent = `${storageProvider.label} unavailable`;
@@ -1189,6 +1207,49 @@
         toast(`저장소 오류: ${err.message}`);
         throw err;
       }
+    }
+
+    function setAppLoading(loading) {
+      $('appLoading').hidden = !loading;
+      $('appShell').dataset.loading = loading ? 'true' : 'false';
+    }
+
+    function applySessionBootstrap(nextSession) {
+      if (!nextSession) return;
+      if (nextSession.householdName) {
+        state.householdName = String(nextSession.householdName).trim() || state.householdName;
+      }
+      if (nextSession.accountId) {
+        const existing = state.accounts.find(a => a.id === nextSession.accountId);
+        if (existing) {
+          if (nextSession.displayName) existing.displayName = nextSession.displayName;
+        } else {
+          state.accounts.push({
+            id: nextSession.accountId,
+            password: '********',
+            displayName: nextSession.displayName || nextSession.accountId,
+            memberId: nextSession.memberId || null,
+            isAdmin: !!nextSession.isAdmin
+          });
+        }
+        if (nextSession.memberId && nextSession.memberEmoji) {
+          const m = state.members.find(member => member.id === nextSession.memberId);
+          if (m) m.emoji = nextSession.memberEmoji;
+        }
+      }
+    }
+
+    function loadStateInBackground(options = {}) {
+      if (stateLoading) return;
+      stateLoading = true;
+      setAppLoading(true);
+      setStatus('데이터 불러오는 중...');
+      loadState(options)
+        .catch(() => {})
+        .finally(() => {
+          stateLoading = false;
+          setAppLoading(false);
+        });
     }
 
     async function saveState(showSaved = true) {
@@ -1279,10 +1340,11 @@
       try {
         session = await storageProvider.login(id, pw);
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        applySessionBootstrap(session);
         showApp();
-        setStatus('데이터 불러오는 중...');
-        await loadState({ seedIfMissing: session.isAdmin });
+        $('loginError').textContent = '';
         startStateSubscription();
+        loadStateInBackground({ seedIfMissing: session.isAdmin });
       } catch (err) {
         const message = err.message || '로그인에 실패했습니다.';
         if ($('appShell').hidden) {
@@ -1315,7 +1377,9 @@
     function showLogin() { $('loginScreen').hidden = false; $('appShell').hidden = true; closeProfileMenu(); }
 
     function familyDisplayName() {
-      const name = String(state.householdName || '').trim();
+      const fromSession = String(session?.householdName || '').trim();
+      const fromState = String(state.householdName || '').trim();
+      const name = fromSession || fromState;
       if (!name || name === 'ForHome') return '우리집 히어로';
       return name;
     }
@@ -1324,8 +1388,8 @@
       $('familyName').textContent = familyDisplayName();
       const acc = account(session?.accountId);
       const m = member(acc?.memberId);
-      const mark = m?.emoji || (acc?.displayName || acc?.id || 'AD').slice(0, 2).toUpperCase();
-      const label = acc?.id || 'user';
+      const mark = session?.memberEmoji || m?.emoji || (session?.displayName || acc?.displayName || acc?.id || 'AD').slice(0, 2).toUpperCase();
+      const label = session?.displayName || acc?.displayName || acc?.id || session?.accountId || 'user';
       $('currentUser').innerHTML = `${escapeHtml(mark)} <span class="ellipsis">${escapeHtml(label)}</span> <span class="chev" aria-hidden="true">▾</span>`;
     }
 
@@ -1630,8 +1694,10 @@
     function softColor(color = '#2563eb') { return `${color}18`; }
     function randomColor() { return ['#2563eb', '#0f9f8f', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'][Math.floor(Math.random() * 6)]; }
     function setStatus(text) {
+      const el = $('syncStatus');
+      if (!el) return;
       const surface = SURFACE_MODE === 'mobile' ? '모바일' : '웹';
-      $('syncStatus').textContent = `${surface} / ${text} / ${storageProvider?.label || '시작 중'}`;
+      el.textContent = `${surface} / ${text} / ${storageProvider?.label || '시작 중'}`;
     }
     function toast(text) {
       const el = $('toast');

@@ -6,6 +6,7 @@ const repoRoot = path.join(__dirname, '..');
 module.exports = defineConfig({
   testDir: path.join(__dirname, 'e2e'),
   timeout: 30000,
+  workers: process.env.CI ? 1 : 2,
   expect: { timeout: 5000 },
   outputDir: path.join(repoRoot, 'log', 'playwright-results'),
   reporter: [['html', { outputFolder: path.join(repoRoot, 'log', 'playwright-report'), open: 'never' }], ['list']],
@@ -22,6 +23,6 @@ module.exports = defineConfig({
     cwd: repoRoot,
     url: 'http://127.0.0.1:8080/api/health',
     reuseExistingServer: true,
-    timeout: 20000
+    timeout: 120000
   }
 });

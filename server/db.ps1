@@ -588,11 +588,14 @@ function Get-UserByAccountId($AccountId) {
 function New-DbSession($UserId, $HouseholdId = $DefaultHouseholdId) {
     $rawToken = New-RandomToken 32
     $tokenHash = Get-Sha256Hex $rawToken
-    $memberRows = Invoke-PsqlCsv "SELECT id FROM household_members WHERE household_id = $(Sql-Literal $HouseholdId) AND user_id = $(Sql-Literal $UserId) LIMIT 1"
-    $userRows = Invoke-PsqlCsv "SELECT account_id, is_admin FROM users WHERE id = $(Sql-Literal $UserId) LIMIT 1"
+    $memberRows = Invoke-PsqlCsv "SELECT id, emoji FROM household_members WHERE household_id = $(Sql-Literal $HouseholdId) AND user_id = $(Sql-Literal $UserId) LIMIT 1"
+    $userRows = Invoke-PsqlCsv "SELECT account_id, is_admin, display_name FROM users WHERE id = $(Sql-Literal $UserId) LIMIT 1"
     if ($userRows.Count -eq 0) { throw "User not found." }
+    $householdRows = Invoke-PsqlCsv "SELECT name FROM households WHERE id = $(Sql-Literal $HouseholdId) LIMIT 1"
     $memberId = if ($memberRows.Count) { $memberRows[0].id } else { $null }
+    $memberEmoji = if ($memberRows.Count) { $memberRows[0].emoji } else { $null }
     $isAdmin = Convert-CsvBool $userRows[0].is_admin
+    $householdName = if ($householdRows.Count) { $householdRows[0].name } else { "ForHome" }
     Invoke-PsqlText "INSERT INTO sessions (token_hash, user_id, household_id, member_id, is_admin, expires_at) VALUES ($(Sql-Literal $tokenHash), $(Sql-Literal $UserId), $(Sql-Literal $HouseholdId), $(Sql-Literal $memberId), $(Sql-Bool $isAdmin), now() + interval '30 days'); UPDATE users SET last_login_at = now() WHERE id = $(Sql-Literal $UserId);" | Out-Null
     [pscustomobject]@{
         token = $rawToken
@@ -602,6 +605,9 @@ function New-DbSession($UserId, $HouseholdId = $DefaultHouseholdId) {
             householdId = $HouseholdId
             memberId = $memberId
             isAdmin = $isAdmin
+            displayName = $userRows[0].display_name
+            householdName = $householdName
+            memberEmoji = $memberEmoji
         }
     }
 }
@@ -619,7 +625,7 @@ function Get-DbSession($Token) {
     if ([string]::IsNullOrWhiteSpace([string]$Token)) { return $null }
     Initialize-Database
     $hash = Get-Sha256Hex $Token
-    $rows = Invoke-PsqlCsv "SELECT s.user_id, s.household_id, s.member_id, s.is_admin, u.account_id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $(Sql-Literal $hash) AND s.expires_at > now() LIMIT 1"
+    $rows = Invoke-PsqlCsv "SELECT s.user_id, s.household_id, s.member_id, s.is_admin, u.account_id, u.display_name, h.name AS household_name, hm.emoji AS member_emoji FROM sessions s JOIN users u ON u.id = s.user_id JOIN households h ON h.id = s.household_id LEFT JOIN household_members hm ON hm.id = s.member_id AND hm.household_id = s.household_id WHERE s.token_hash = $(Sql-Literal $hash) AND s.expires_at > now() LIMIT 1"
     if ($rows.Count -eq 0) { return $null }
     Invoke-PsqlText "UPDATE sessions SET last_seen_at = now() WHERE token_hash = $(Sql-Literal $hash)" | Out-Null
     [pscustomobject]@{
@@ -628,6 +634,9 @@ function Get-DbSession($Token) {
         householdId = $rows[0].household_id
         memberId = if ($rows[0].member_id) { $rows[0].member_id } else { $null }
         isAdmin = Convert-CsvBool $rows[0].is_admin
+        displayName = $rows[0].display_name
+        householdName = $rows[0].household_name
+        memberEmoji = $rows[0].member_emoji
     }
 }
 
