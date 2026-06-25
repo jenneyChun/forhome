@@ -53,10 +53,11 @@ Current state areas:
 - badge history
 - change requests
 
-## Mobile Layout
+## Web and Mobile Clients
 
-- The mobile surface is enabled on an `m.` host.
-- Local checks can use `?surface=mobile`.
+- Web shell: `code/web/` at `http://localhost:8080`
+- Mobile shell: `code/mobile/` at `http://m.localhost:8080`
+- Shared logic: `code/shared/forhome-core.js`
 - Playwright/local UI checks can use `?storage=test` for browser mock storage.
 
 ## Backup And Briefing

@@ -1,0 +1,181 @@
+body {
+background: var(--bg);
+overflow-x: hidden;
+}
+.login-screen {
+align-items: start;
+justify-items: center;
+padding: 18px 12px;
+}
+.login-box,
+.topbar-inner,
+.layout {
+max-width: 460px;
+}
+.login-box {
+width: min(100%, 380px);
+margin-top: 18px;
+padding: 20px;
+}
+.status-line {
+max-width: 42vw;
+}
+.topbar {
+background: rgba(255, 255, 255, .98);
+box-shadow: 0 -6px 22px rgba(120, 110, 140, .07);
+}
+.topbar-inner {
+padding: 10px 12px;
+}
+.app-title strong {
+font-size: 15px;
+}
+.layout {
+grid-template-columns: 1fr;
+padding: 10px 10px 96px;
+gap: 10px;
+}
+.tabbar {
+position: fixed;
+left: 50%;
+right: auto;
+bottom: 0;
+top: auto;
+z-index: 25;
+width: min(100%, 460px);
+transform: translateX(-50%);
+grid-template-columns: repeat(5, 1fr);
+gap: 0;
+padding: 9px 6px calc(26px + env(safe-area-inset-bottom));
+background: rgba(255, 255, 255, .97);
+border-top: 1px solid #F0EEF4;
+box-shadow: 0 -6px 22px rgba(120, 110, 140, .07);
+backdrop-filter: blur(12px);
+}
+.tab-btn {
+height: auto;
+min-height: 52px;
+border-color: transparent;
+background: transparent;
+display: grid;
+place-items: center;
+gap: 3px;
+padding: 5px 4px;
+font-size: 10px;
+font-weight: 800;
+color: #A8A2B2;
+border-radius: 0;
+box-shadow: none;
+}
+.tab-btn .tab-emoji {
+font-size: 21px;
+opacity: .5;
+}
+.tab-btn.active {
+border-color: transparent;
+background: transparent;
+color: var(--brand);
+box-shadow: none;
+}
+.tab-btn.active .tab-emoji {
+opacity: 1;
+}
+.grid {
+grid-template-columns: 1fr;
+gap: 10px;
+}
+.span-4,
+.span-5,
+.span-6,
+.span-7,
+.span-8,
+.span-12 {
+grid-column: 1;
+}
+.screen-hero {
+grid-column: 1;
+padding: 14px;
+}
+.screen-hero h2 {
+font-size: 20px;
+}
+.screen-hero p {
+font-size: 13px;
+}
+.panel {
+padding: 12px;
+box-shadow: 0 4px 14px rgba(105, 71, 31, .05);
+}
+.panel-head {
+align-items: flex-start;
+}
+.metric-row {
+display: flex;
+gap: 8px;
+overflow-x: auto;
+padding-bottom: 2px;
+scroll-snap-type: x proximity;
+}
+.metric-row > * {
+min-width: 132px;
+scroll-snap-align: start;
+}
+.selector-grid {
+grid-template-columns: none;
+grid-auto-flow: column;
+grid-auto-columns: minmax(144px, 72%);
+overflow-x: auto;
+padding-bottom: 2px;
+scroll-snap-type: x proximity;
+}
+.select-card {
+scroll-snap-align: start;
+}
+.form-grid {
+grid-template-columns: 1fr;
+}
+.col-2,
+.col-3,
+.col-4,
+.col-5,
+.col-6,
+.col-12 {
+grid-column: 1;
+}
+.day {
+min-height: 58px;
+padding: 5px;
+font-size: 12px;
+}
+.photo-cell {
+width: 72px;
+height: 58px;
+}
+.user-pill {
+max-width: 104px;
+}
+.account-row,
+.rank-row,
+.member-row {
+align-items: flex-start;
+}
+.review-actions .btn {
+flex: 1 1 140px;
+}
+  .login-screen {
+  justify-items: stretch;
+  }
+  .login-box,
+  .topbar-inner,
+  .layout {
+  max-width: none;
+  }
+  .login-box {
+  width: 100%;
+  }
+  .tabbar {
+  left: 0;
+  right: 0;
+  width: 100%;
+  transform: none;
+  }

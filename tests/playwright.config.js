@@ -15,8 +15,21 @@ module.exports = defineConfig({
     trace: 'on-first-retry'
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 820 } } },
-    { name: 'mobile', use: { ...devices['Pixel 5'] } }
+    {
+      name: 'desktop',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 820 },
+        baseURL: process.env.PLAYWRIGHT_WEB_BASE_URL || 'http://127.0.0.1:8080'
+      }
+    },
+    {
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 5'],
+        baseURL: process.env.PLAYWRIGHT_MOBILE_BASE_URL || 'http://m.localhost:8080'
+      }
+    }
   ],
   webServer: {
     command: 'powershell -NoProfile -ExecutionPolicy Bypass -File server/server.ps1 -Port 8080',

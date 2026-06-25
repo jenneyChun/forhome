@@ -16,11 +16,11 @@ ForHome은 별도 백엔드 서버 없이 다음 구조로 동작한다.
 - 정적 테스트 서버: `server/server.ps1`
 - 백업/리포트: `scripts/firestore-backup.js`
 
-상태 모델은 주로 `code/index.html`의 `defaultState()`와 `normalizeState()`에서 관리한다.
+상태 모델은 주로 `code/shared/forhome-core.js`의 `defaultState()`와 `normalizeState()`에서 관리한다.
 
 ## 주요 파일
 
-- `code/index.html`
+- `code/shared/forhome-core.js`
   - 상태 모델, 정규화, 저장, 화면 액션이 모두 들어 있다.
 - `scripts/firestore-backup.js`
   - Firestore state를 읽어 날짜별 JSON/Markdown 백업과 아침 브리핑을 만든다.

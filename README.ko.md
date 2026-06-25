@@ -5,6 +5,9 @@ ForHome은 가족 구성원이 집안일, 돌봄, 내일 할 일, 메시지를 �
 ## 폴더 구조
 
 - `code/`: 브라우저 클라이언트 코드
+  - `code/web/`: PC 웹 셸
+  - `code/mobile/`: 모바일 셸 (`m.` 호스트)
+  - `code/shared/`: 공통 JS/CSS 및 코어 로직
 - `server/`: 정적 파일 제공, 인증, 세션, PostgreSQL API를 담당하는 PowerShell 서버
 - `server/sql/schema.sql`: PostgreSQL 정규화 스키마
 - `scripts/`: PostgreSQL 백업과 자동화 스크립트
@@ -12,6 +15,8 @@ ForHome은 가족 구성원이 집안일, 돌봄, 내일 할 일, 메시지를 �
 - `log/`: 로컬 런타임 로그와 Playwright 리포트
 - `tests/`: 구조 테스트, 픽스처, Playwright E2E 테스트
 - `docs/`: 요구사항, 설계 문서, Codex 세션 노트
+- `Report/`: Cursor/Codex 작업·상태 보고서
+- `Prompting/`: 재사용 프롬프트 및 에이전트 지시문
 
 ## PostgreSQL 설정
 
@@ -54,8 +59,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1 -Port 8080
 
 그다음 아래 주소를 여세요.
 
-- PC: `http://localhost:8080`
-- 모바일: 서버 창에 출력된 LAN URL 사용
+- 웹(PC): `http://localhost:8080`
+- 모바일: `http://m.localhost:8080`
+- LAN: 서버 창에 출력된 URL 사용
 
 서버는 정적 파일과 API를 함께 제공합니다.
 
@@ -72,22 +78,44 @@ GET  /api/invites/:id
 POST /api/invites/:id
 ```
 
-## 모바일 레이아웃
+## 웹·모바일 클라이언트
 
-모바일 전용 레이아웃은 `m.` 호스트에서 켜집니다. 실제 배포 환경에서는 `https://m.<도메인>`을 같은 API 서버 또는 리버스 프록시에 연결하세요. 모바일 기기가 일반 웹 주소로 들어오면 앱이 `https://m.<현재 도메인>` 주소로 자동 이동합니다.
+ForHome은 **같은 API 서버(8080)** 에서 **두 개의 브라우저 클라이언트**를 제공합니다. 서버는 요청 `Host` 헤더로 셸을 선택하며, `?surface=` 쿼리는 더 이상 사용하지 않습니다.
 
-로컬에서는 별도 `m.` 도메인 대신 쿼리 문자열로 확인할 수 있습니다.
+| 클라이언트 | 로컬 URL | 정적 파일 | 레이아웃 |
+|-----------|----------|-----------|----------|
+| 웹(PC) | `http://localhost:8080` | `code/web/` | 좌측 탭, 12열 grid |
+| 모바일 | `http://m.localhost:8080` | `code/mobile/` | 하단 5탭, 단일 컬럼 |
 
-```text
-http://localhost:8080/?surface=mobile
-http://localhost:8080/?surface=web
+**공유 자산**
+
+| 경로 | 역할 |
+|------|------|
+| `code/shared/forhome-core.js` | 상태·API·render·이벤트 (`ForHomeApp.boot`) |
+| `code/shared/tokens.css` | urichib 디자인 토큰·공통 컴포넌트 스타일 |
+| `code/shared/web.css` | PC 전용 레이아웃 |
+| `code/shared/mobile.css` | 모바일 전용 레이아웃(하단 탭바) |
+
+두 셸 모두 동일한 5탭(브리핑·기록·확인·내일·설정)과 `data-testid`를 유지합니다.
+
+배포 환경에서는 `https://<도메인>`과 `https://m.<도메인>`을 같은 서버에 연결하면 됩니다.
+
+웹·모바일 간 로그인 쿠키를 공유하려면 `data/db.env.ps1`에 다음을 추가하세요.
+
+```powershell
+$env:FORHOME_COOKIE_DOMAIN = ".localhost"
 ```
+
+설정하지 않으면 `localhost`와 `m.localhost`에서 각각 로그인해야 합니다.
 
 Playwright나 브라우저 mock 저장소가 필요할 때만 테스트 모드를 명시합니다.
 
 ```text
 http://localhost:8080/?storage=test
+http://m.localhost:8080/?storage=test
 ```
+
+구현 상세: [`Report/260625_web-mobile-client-split.ko.md`](Report/260625_web-mobile-client-split.ko.md)
 
 ## 초대 기반 가입
 

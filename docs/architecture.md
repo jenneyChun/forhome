@@ -6,8 +6,10 @@ ForHome now uses a PostgreSQL-backed API server.
 
 ```text
 Browser
-  -> server/server.ps1
-     -> static files from code/
+  -> server/server.ps1 (port 8080)
+     -> Host localhost        -> code/web/
+     -> Host m.localhost      -> code/mobile/
+     -> /shared/*             -> code/shared/
      -> /api/* JSON routes
      -> server/db.ps1
      -> PostgreSQL
@@ -19,16 +21,19 @@ The browser does not connect to PostgreSQL directly. It uses `fetch()` with same
 
 ### Browser Client
 
-- Main file: `code/index.html`
+- Web shell: `code/web/index.html` (PC layout, left sidebar)
+- Mobile shell: `code/mobile/index.html` (bottom tab bar, urichib-style)
+- Shared logic: `code/shared/forhome-core.js`
+- Shared styling: `code/shared/tokens.css`
 - Production storage provider: `createPostgresApiProvider()`
 - Test storage provider: `createTestStorageProvider()`
-- Mobile layout: enabled by `m.` host or local `?surface=mobile`
+- Mobile entry: `http://m.localhost:8080` locally, `https://m.<domain>` in production
 - Test mode: enabled by `?storage=test` or `window.__FORHOME_TEST__`
 
 ### PowerShell Server
 
 - File: `server/server.ps1`
-- Serves static files from `code/`
+- Serves static files from `code/web`, `code/mobile`, and `code/shared` based on the request `Host`
 - Exposes `/api/health`
 - Exposes auth/session/invitation/state routes
 - Issues `httpOnly` session cookies

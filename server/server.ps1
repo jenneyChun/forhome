@@ -5,8 +5,13 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir ".."))
-$ClientRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "code"))
+$CodeRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "code"))
+$WebClientRoot = [System.IO.Path]::GetFullPath((Join-Path $CodeRoot "web"))
+$MobileClientRoot = [System.IO.Path]::GetFullPath((Join-Path $CodeRoot "mobile"))
+$SharedClientRoot = [System.IO.Path]::GetFullPath((Join-Path $CodeRoot "shared"))
+$LegacyClientRoot = $CodeRoot
 $LogDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "log"))
+$CookieDomain = if ($env:FORHOME_COOKIE_DOMAIN) { [string]$env:FORHOME_COOKIE_DOMAIN } else { $null }
 
 . (Join-Path $ScriptDir "db.ps1")
 
@@ -173,11 +178,27 @@ function Get-CookieValue($Headers, $Name) {
 }
 
 function New-SessionCookie($Token) {
-    return "$SessionCookieName=$([System.Uri]::EscapeDataString($Token)); Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+    $domainPart = if ($CookieDomain) { "; Domain=$CookieDomain" } else { "" }
+    return "$SessionCookieName=$([System.Uri]::EscapeDataString($Token)); Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000$domainPart"
 }
 
 function New-ExpiredSessionCookie {
-    return "$SessionCookieName=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    $domainPart = if ($CookieDomain) { "; Domain=$CookieDomain" } else { "" }
+    return "$SessionCookieName=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0$domainPart"
+}
+
+function Get-RequestHost($Headers) {
+    if (-not $Headers.ContainsKey("host")) { return "localhost" }
+    return ($Headers["host"] -split ":")[0].ToLowerInvariant()
+}
+
+function Test-MobileHost($HostName) {
+    return $HostName.StartsWith("m.")
+}
+
+function Get-SurfaceClientRoot($HostName) {
+    if (Test-MobileHost $HostName) { return $MobileClientRoot }
+    return $WebClientRoot
 }
 
 function Get-RequestSession($Request) {
@@ -207,19 +228,29 @@ function Get-MimeType($Path) {
     }
 }
 
-function Send-StaticFile($Client, $RequestPath) {
+function Send-StaticFile($Client, $RequestPath, $HostName) {
     $pathOnly = ($RequestPath -split "\?")[0]
     $decoded = [System.Uri]::UnescapeDataString($pathOnly).TrimStart("/")
     if ([string]::IsNullOrWhiteSpace($decoded)) { $decoded = "index.html" }
-    if ($decoded.StartsWith("invite/")) { $decoded = "index.html" }
+
+    $clientRoot = Get-SurfaceClientRoot $HostName
+    if ($decoded.StartsWith("shared/")) {
+        $clientRoot = $SharedClientRoot
+        $decoded = $decoded.Substring("shared/".Length)
+    } elseif ($decoded.StartsWith("auth-invitation/")) {
+        $clientRoot = $LegacyClientRoot
+    } elseif ($decoded.StartsWith("invite/")) {
+        $decoded = "index.html"
+    }
+
     $relative = $decoded.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
-    $full = [System.IO.Path]::GetFullPath((Join-Path $ClientRoot $relative))
-    if (-not $full.StartsWith($ClientRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $full = [System.IO.Path]::GetFullPath((Join-Path $clientRoot $relative))
+    if (-not $full.StartsWith($clientRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         Send-Json $Client 404 @{ error = "not_found" }
         return
     }
     if (-not (Test-Path $full) -or (Get-Item $full).PSIsContainer) {
-        $full = Join-Path $ClientRoot "index.html"
+        $full = Join-Path $clientRoot "index.html"
     }
     Send-Bytes $Client 200 (Get-MimeType $full) ([System.IO.File]::ReadAllBytes($full))
 }
@@ -489,7 +520,10 @@ $ip = Get-LocalIPv4
 $script:AllowedOrigins = @(
     "http://localhost:$Port",
     "http://127.0.0.1:$Port",
-    "http://${ip}:$Port"
+    "http://m.localhost:$Port",
+    "http://m.127.0.0.1:$Port",
+    "http://${ip}:$Port",
+    "http://m.${ip}:$Port"
 )
 try {
     Initialize-Database
@@ -501,8 +535,14 @@ try {
 $listeners = Start-ServerListeners -Port $Port -LanIP $ip
 Write-Host ""
 Write-Host "ForHome PostgreSQL API server is running."
-Write-Host "PC:     http://localhost:$Port"
-Write-Host "LAN:    http://$ip`:$Port"
+Write-Host "Web:    http://localhost:$Port"
+Write-Host "Mobile: http://m.localhost:$Port"
+Write-Host "LAN:    http://$ip`:$Port  |  http://m.$ip`:$Port"
+if ($CookieDomain) {
+    Write-Host "Cookie: Domain=$CookieDomain (shared across web/mobile subdomains)"
+} else {
+    Write-Host "Cookie: host-only (set FORHOME_COOKIE_DOMAIN=.localhost for shared login)"
+}
 Write-Host "DB:     PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD or data\db.env.ps1"
 Write-Host "Stop:   Ctrl + C"
 Write-Host ""
@@ -553,7 +593,8 @@ while ($true) {
                 Send-ApiError $client $status $code $message
             }
         } elseif ($request.Method -eq "GET") {
-            Send-StaticFile $client $request.Path
+            $hostName = Get-RequestHost $request.Headers
+            Send-StaticFile $client $request.Path $hostName
         } elseif ($request.Method -eq "OPTIONS") {
             Send-Text $client 204 "text/plain; charset=utf-8" ""
         } else {

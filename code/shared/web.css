@@ -1,0 +1,27 @@
+/* PC web shell — left sidebar navigation */
+html[data-surface="web"] .layout {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 16px;
+}
+
+html[data-surface="web"] .tabbar {
+  display: grid;
+  gap: 8px;
+  align-self: start;
+  position: sticky;
+  top: 74px;
+}
+
+html[data-surface="web"] .tab-btn {
+  height: 42px;
+  flex-direction: row;
+  justify-content: flex-start;
+}
+
+html[data-surface="web"] .grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}

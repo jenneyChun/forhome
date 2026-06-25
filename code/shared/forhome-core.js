@@ -1,0 +1,1991 @@
+(function (global) {
+    const SESSION_KEY = 'forhome-session-v1';
+    const TEST_STORAGE_KEY = 'forhome-test-state-v1';
+    const URL_PARAMS = new URLSearchParams(location.search);
+    const STORAGE_MODE = URL_PARAMS.get('storage');
+    let SURFACE_MODE = 'web';
+    const FORCED_NOW = URL_PARAMS.get('now');
+    const TEST_MODE = STORAGE_MODE === 'test'
+      || STORAGE_MODE === 'mock'
+      || window.__FORHOME_TEST__ === true;
+    const PARENT_IDS = ['mom', 'dad'];
+    const BRIEFING_HOUR = 7;
+    const CATEGORIES = { all: '전체', house: '집안', care: '육아', pet: '반려동물', child: '아이' };
+    const CAT_TOKENS = {
+      house: { label: '집안', emoji: '🧹', tile: '#E3F6EE', text: '#239E73', soft: '#EFFAF5', color: '#7ED9B0' },
+      care: { label: '육아', emoji: '🍼', tile: '#EEE6FA', text: '#7E5FC0', soft: '#F6F1FC', color: '#B79BE0' },
+      pet: { label: '반려동물', emoji: '🐾', tile: '#FFEBDB', text: '#D17E40', soft: '#FFF4EB', color: '#FFC59B' },
+      child: { label: '아이', emoji: '✨', tile: '#FFE6E1', text: '#DD6E5A', soft: '#FFF1EE', color: '#FF9F90' }
+    };
+    const BADGES = [
+      { id: 'first', emoji: 'B1', name: 'First task', desc: 'Complete one task this week', cond: (m, h) => countFor(m, h) >= 1 },
+      { id: 'five', emoji: 'B5', name: 'Steady', desc: 'Complete five tasks this week', cond: (m, h) => countFor(m, h) >= 5 },
+      { id: 'ten', emoji: 'B10', name: 'Hero', desc: 'Complete ten tasks this week', cond: (m, h) => countFor(m, h) >= 10 },
+      { id: 'xp100', emoji: 'XP', name: '100 XP', desc: 'Earn 100 XP this week', cond: (m, h) => xpFor(m, h) >= 100 },
+      { id: 'fat20', emoji: 'FT', name: 'Heavy lift', desc: 'Reach fatigue 20 this week', cond: (m, h) => fatigueFor(m, h) >= 20 },
+      { id: 'msg', emoji: 'MS', name: 'Messenger', desc: 'Send a family message', cond: (m) => state.messages.some(x => x.fromId === m.id) }
+    ];
+    const defaultState = () => ({
+      version: 0,
+      updatedAt: new Date().toISOString(),
+      householdName: '우리집 히어로',
+      settings: { vacationThreshold: 25, weekStartsOn: 1 },
+      members: [
+        memberSeed('mom', '엄마', '엄', true, '#ef4444'),
+        memberSeed('dad', '아빠', '아', true, '#2563eb'),
+        memberSeed('son', '아들', '들', false, '#f59e0b')
+      ],
+      accounts: [
+        { id: 'mom', password: 'mom1234', memberId: 'mom', isAdmin: false },
+        { id: 'dad', password: 'dad1234', memberId: 'dad', isAdmin: false },
+        { id: 'son', password: 'son1234', memberId: 'son', isAdmin: false },
+        { id: 'admin', password: 'admin1234', memberId: null, isAdmin: true }
+      ],
+      chores: [
+        choreSeed('c1', '설거지', '식', 2, 'house'),
+        choreSeed('c2', '청소기 돌리기', '청', 3, 'house'),
+        choreSeed('c3', '빨래', '빨', 2, 'house'),
+        choreSeed('p1', '약 챙기기', '약', 2, 'care'),
+        choreSeed('pet1', '밥 주기', '밥', 1, 'pet'),
+        choreSeed('ch1', '방 정리', '방', 1, 'child'),
+        choreSeed('hw1', '숙제 확인', '숙', 2, 'child')
+      ],
+      history: [],
+      messages: [],
+      tomorrowPlans: [],
+      careAssignments: [],
+      careSessions: [],
+      careItems: [
+        careItemSeed('edu', 'Education', 'ED', 3),
+        careItemSeed('meal', 'Meal care', 'ME', 2),
+        careItemSeed('play', 'Play care', 'PL', 2)
+      ],
+      changeRequests: [],
+      badgeHistory: []
+    });
+    function memberSeed(id, name, emoji, restricted, color) {
+      return { id, name, emoji, restricted, role: id === 'son' ? 'child' : 'adult', color, xp: 0, totalFatigue: 0, completedTasks: 0, stickers: 0, onVacation: false, earnedBadges: [] };
+    }
+    function choreSeed(id, name, emoji, fatigue, category) {
+      return { id, name, emoji, fatigue, xp: fatigue * 10, category };
+    }
+    function careItemSeed(id, name, emoji, points) {
+      return { id, name, emoji, points, xp: points * 10 };
+    }
+
+    let state = defaultState();
+    let session = null;
+    let activeTab = 'home';
+    let selectedMemberId = null;
+    let selectedChoreId = null;
+    let selectedCategory = 'all';
+    let badgeMemberId = null;
+    let calendarMonth = new Date();
+    let selectedDate = dateKey(nowMs());
+    let saving = false;
+    let stateLoading = false;
+    const proofImageCache = new Map();
+    let storageProvider = null;
+    let unsubscribeState = null;
+    let profileMenuOpen = false;
+    let accountProfile = null;
+
+    const $ = (id) => document.getElementById(id);
+    const money = new Intl.NumberFormat('en-US');
+
+    
+
+    function createStorageProvider() {
+      return TEST_MODE ? createTestStorageProvider() : createPostgresApiProvider();
+    }
+
+    function createTestStorageProvider() {
+      return {
+        mode: 'test',
+        label: 'Playwright mock storage',
+        async initialize() {},
+        getCurrentSession() {
+          return readJson(sessionStorage.getItem(SESSION_KEY));
+        },
+        async login(accountId, password) {
+          const acc = defaultState().accounts.find(a => a.id === accountId && a.password === password);
+          if (!acc) throw new Error('아이디와 비밀번호를 확인해 주세요.');
+          const m = defaultState().members.find(member => member.id === acc.memberId);
+          return {
+            accountId: acc.id,
+            memberId: acc.memberId,
+            isAdmin: !!acc.isAdmin,
+            displayName: acc.displayName || acc.id,
+            householdName: defaultState().householdName || '우리집 히어로',
+            memberEmoji: m?.emoji || (acc.displayName || acc.id).slice(0, 2).toUpperCase()
+          };
+        },
+        async logout() {},
+        async loadState() {
+          const saved = readJson(localStorage.getItem(TEST_STORAGE_KEY));
+          if (saved) return saved;
+          const seeded = { ...defaultState(), version: 1, updatedAt: new Date().toISOString() };
+          localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(seeded));
+          return seeded;
+        },
+        async loadStateSummary() {
+          return this.loadState();
+        },
+        async loadStateVersion() {
+          const saved = readJson(localStorage.getItem(TEST_STORAGE_KEY));
+          return { version: saved?.version || 0, updatedAt: saved?.updatedAt || null };
+        },
+        async getTaskProof() {
+          return { entryId: '', proofImage: '', hasProofImage: false };
+        },
+        async saveState(next) {
+          const current = readJson(localStorage.getItem(TEST_STORAGE_KEY));
+          const saved = { ...next, version: Number(current?.version || next.version || 0) + 1, updatedAt: new Date().toISOString() };
+          localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(saved));
+          window.dispatchEvent(new CustomEvent('forhome-test-state-updated', { detail: saved }));
+          return saved;
+        },
+        subscribeState(onState) {
+          const onStorage = (event) => {
+            if (event.key !== TEST_STORAGE_KEY || !event.newValue) return;
+            const next = readJson(event.newValue);
+            if (next) onState(next);
+          };
+          const onLocal = (event) => onState(event.detail);
+          window.addEventListener('storage', onStorage);
+          window.addEventListener('forhome-test-state-updated', onLocal);
+          return () => {
+            window.removeEventListener('storage', onStorage);
+            window.removeEventListener('forhome-test-state-updated', onLocal);
+          };
+        },
+        getCurrentAccountId() {
+          return this.getCurrentSession()?.accountId || null;
+        },
+        async getProfile() {
+          const acc = account(this.getCurrentSession()?.accountId);
+          const m = member(acc?.memberId);
+          return {
+            accountId: acc?.id || '',
+            displayName: acc?.displayName || m?.name || acc?.id || '',
+            householdName: state.householdName || '우리집 히어로',
+            memberEmoji: m?.emoji || 'AD',
+            isAdmin: !!acc?.isAdmin
+          };
+        },
+        async updateProfile(body) {
+          const acc = account(this.getCurrentSession()?.accountId);
+          if (!acc) throw new Error('로그인이 필요합니다.');
+          if (body.displayName) {
+            acc.displayName = body.displayName.trim();
+            if (acc.memberId) {
+              const m = member(acc.memberId);
+              if (m) {
+                m.name = body.displayName.trim();
+                m.emoji = body.displayName.trim().slice(0, 2);
+              }
+            }
+          }
+          if (body.householdName) state.householdName = body.householdName.trim();
+          if (body.password) {
+            if (acc.password !== body.currentPassword) throw new Error('현재 비밀번호가 올바르지 않습니다.');
+            acc.password = body.password;
+          }
+          await this.saveState(state);
+          return this.getProfile();
+        }
+      };
+    }
+
+    async function apiJson(path, options = {}) {
+      const init = {
+        method: options.method || 'GET',
+        credentials: 'same-origin',
+        headers: {}
+      };
+      if (options.body !== undefined) {
+        init.headers['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(options.body);
+      }
+      let response;
+      try {
+        response = await fetch(path, init);
+      } catch (err) {
+        throw new Error('API 서버에 연결할 수 없습니다. server\\start_server.bat 또는 npm run dev:local 실행 후 http://localhost:8080 으로 접속하세요.');
+      }
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          data = { message: text };
+        }
+      }
+      if (!response.ok) {
+        let message = data.message || data.error || `API error ${response.status}`;
+        if (response.status === 404) {
+          message = 'API 경로를 찾을 수 없습니다. index.html을 직접 열지 말고 http://localhost:8080 에서 ForHome 서버를 통해 접속하세요.';
+        } else if (response.status === 503 || /password supplied|password authentication failed|psql was not found/i.test(message)) {
+          message = 'PostgreSQL 연결 실패입니다. data\\db.env.ps1 에 postgres 비밀번호(PGPASSWORD)를 설정한 뒤 npm run setup:db 를 실행하세요.';
+        }
+        const err = new Error(message);
+        err.status = response.status;
+        err.payload = data;
+        throw err;
+      }
+      return data;
+    }
+
+    function createPostgresApiProvider() {
+      let currentSession = null;
+      return {
+        mode: 'postgresql',
+        label: 'PostgreSQL API',
+        async initialize() {
+          const result = await apiJson('/api/session');
+          currentSession = result.authenticated ? result.session : null;
+        },
+        getCurrentSession() {
+          return currentSession;
+        },
+        async login(accountId, password) {
+          const result = await apiJson('/api/auth/login', { method: 'POST', body: { accountId, password } });
+          currentSession = result.session;
+          return currentSession;
+        },
+        async logout() {
+          try {
+            await apiJson('/api/auth/logout', { method: 'POST' });
+          } finally {
+            currentSession = null;
+          }
+        },
+        async loadState(options = {}) {
+          const query = options.sinceVersion != null ? `?sinceVersion=${encodeURIComponent(options.sinceVersion)}` : '';
+          return apiJson(`/api/state${query}`);
+        },
+        async loadStateSummary() {
+          return apiJson('/api/state/summary');
+        },
+        async loadStateVersion() {
+          return apiJson('/api/state/version');
+        },
+        async getTaskProof(entryId) {
+          const result = await apiJson(`/api/tasks/${encodeURIComponent(entryId)}/proof`);
+          return result.proof;
+        },
+        async saveState(next) {
+          return apiJson('/api/state', { method: 'PUT', body: next });
+        },
+        subscribeState(onState) {
+          let stopped = false;
+          const timer = setInterval(async () => {
+            if (stopped) return;
+            try {
+              if (this.loadStateVersion) {
+                const versionInfo = await this.loadStateVersion();
+                if ((versionInfo.version || 0) === (state.version || 0)) return;
+              }
+              const remote = await this.loadState({ sinceVersion: state.version || 0 });
+              if (remote?.unchanged) return;
+              onState(remote);
+            } catch (err) {
+              setStatus(`동기화 확인 실패: ${err.message}`);
+            }
+          }, 5000);
+          return () => {
+            stopped = true;
+            clearInterval(timer);
+          };
+        },
+        getCurrentAccountId() {
+          return currentSession?.accountId || null;
+        },
+        async getProfile() {
+          const result = await apiJson('/api/profile');
+          return result.profile;
+        },
+        async updateProfile(body) {
+          const result = await apiJson('/api/profile', { method: 'PATCH', body });
+          return result.profile;
+        }
+      };
+    }
+
+    async function init() {
+      storageProvider = createStorageProvider();
+      state = normalizeState(defaultState());
+      try {
+        await storageProvider.initialize();
+        $('loginServerText').textContent = `${storageProvider.label} ready`;
+        setStatus('준비됨');
+        session = storageProvider.getCurrentSession();
+        if (session) {
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+          applySessionBootstrap(session);
+          showApp();
+          startStateSubscription();
+          loadSummaryThenFull({ seedIfMissing: session.isAdmin });
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+          showLogin();
+        }
+      } catch (err) {
+        $('loginServerText').textContent = '저장소 연결 실패';
+        setStatus('저장소 사용 불가');
+        toast(`저장소 오류: ${err.message}`);
+        showLogin();
+      }
+    }
+
+    async function loadState(options = {}) {
+      try {
+        const remote = await storageProvider.loadState(options);
+        if (remote?.unchanged) {
+          setStatus(`동기화됨 v${state.version || 0}`);
+          return;
+        }
+        state = normalizeState(remote);
+        $('loginServerText').textContent = `${storageProvider.label} connected`;
+        setStatus(`동기화됨 v${state.version || 0}`);
+        render();
+      } catch (err) {
+        state = normalizeState(defaultState());
+        $('loginServerText').textContent = `${storageProvider.label} unavailable`;
+        setStatus('저장소 불러오기 실패');
+        toast(`저장소 오류: ${err.message}`);
+        throw err;
+      }
+    }
+
+    function loadSummaryThenFull(options = {}) {
+      if (stateLoading) return;
+      stateLoading = true;
+      setAppLoading(true);
+      setStatus('데이터 불러오는 중...');
+      (async () => {
+        try {
+          if (storageProvider.loadStateSummary) {
+            try {
+              const summary = normalizeState(await storageProvider.loadStateSummary());
+              state = summary;
+              setAppLoading(false);
+              setStatus(`요약 불러옴 v${state.version || 0}`);
+              render();
+            } catch (summaryErr) {
+              setStatus('전체 데이터 불러오는 중...');
+            }
+          }
+          await loadState(options);
+        } catch (err) {
+          toast(`저장소 오류: ${err.message}`);
+        } finally {
+          stateLoading = false;
+          setAppLoading(false);
+        }
+      })();
+    }
+
+    function loadStateInBackground(options = {}) {
+      loadSummaryThenFull(options);
+    }
+    function setAppLoading(loading) {
+      $('appLoading').hidden = !loading;
+      $('appShell').dataset.loading = loading ? 'true' : 'false';
+    }
+
+    function applySessionBootstrap(nextSession) {
+      if (!nextSession) return;
+      if (nextSession.householdName) {
+        state.householdName = String(nextSession.householdName).trim() || state.householdName;
+      }
+      if (nextSession.accountId) {
+        const existing = state.accounts.find(a => a.id === nextSession.accountId);
+        if (existing) {
+          if (nextSession.displayName) existing.displayName = nextSession.displayName;
+        } else {
+          state.accounts.push({
+            id: nextSession.accountId,
+            password: '********',
+            displayName: nextSession.displayName || nextSession.accountId,
+            memberId: nextSession.memberId || null,
+            isAdmin: !!nextSession.isAdmin
+          });
+        }
+        if (nextSession.memberId && nextSession.memberEmoji) {
+          const m = state.members.find(member => member.id === nextSession.memberId);
+          if (m) m.emoji = nextSession.memberEmoji;
+        }
+      }
+    }
+
+    async function saveState(showSaved = true) {
+      saving = true;
+      state.updatedAt = new Date().toISOString();
+      updateVacationFlags(state);
+      try {
+        state = normalizeState(await storageProvider.saveState(state));
+        setStatus(`동기화됨 v${state.version || 0}`);
+        if (showSaved) toast('저장했습니다');
+      } catch (err) {
+        setStatus('저장 실패');
+        toast(`저장 실패: ${err.message}`);
+      } finally {
+        saving = false;
+      }
+      render();
+    }
+
+    async function saveStateOptimistic(doneText = '') {
+      saving = true;
+      state.updatedAt = new Date().toISOString();
+      updateVacationFlags(state);
+      setStatus('저장 중');
+      render();
+      try {
+        state = normalizeState(await storageProvider.saveState(state));
+        setStatus(`동기화됨 v${state.version || 0}`);
+        if (doneText) toast(doneText);
+      } catch (err) {
+        setStatus('저장 실패');
+        toast(`저장 실패: ${err.message}`);
+        try {
+          state = normalizeState(await storageProvider.loadState());
+          setStatus(`다시 불러옴 v${state.version || 0}`);
+        } catch {}
+      } finally {
+        saving = false;
+      }
+      render();
+    }
+
+    function startStateSubscription() {
+      if (unsubscribeState) unsubscribeState();
+      unsubscribeState = storageProvider.subscribeState((remoteState) => {
+        if (saving || $('appShell').hidden) return;
+        const active = document.activeElement;
+        if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+        const remote = normalizeState(remoteState);
+        if ((remote.version || 0) !== (state.version || 0)) {
+          state = remote;
+          setStatus(`동기화됨 v${state.version || 0}`);
+          render();
+        }
+      });
+    }
+
+    async function refreshIfChanged() {
+      if (saving || $('appShell').hidden) return;
+      const active = document.activeElement;
+      if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+      try {
+        const remoteRaw = await storageProvider.loadState({ sinceVersion: state.version || 0 });
+        if (remoteRaw?.unchanged) return;
+        const remote = normalizeState(remoteRaw);
+        if ((remote.version || 0) !== (state.version || 0)) {
+          state = remote;
+          setStatus(`동기화됨 v${state.version || 0}`);
+          render();
+        }
+      } catch {
+        setStatus('저장소 확인 실패');
+      }
+    }
+
+    async function hardReload() {
+      try {
+        await loadState();
+        render();
+        toast('새로고침했습니다');
+      } catch {}
+    }
+
+    async function doLogin() {
+      const id = $('loginId').value.trim();
+      const pw = $('loginPw').value;
+      $('loginButton').disabled = true;
+      $('signupButton').disabled = true;
+      $('loginError').textContent = '로그인 중...';
+      try {
+        session = await storageProvider.login(id, pw);
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        applySessionBootstrap(session);
+        showApp();
+        $('loginError').textContent = '';
+        startStateSubscription();
+        loadStateInBackground({ seedIfMissing: session.isAdmin });
+      } catch (err) {
+        const message = err.message || '로그인에 실패했습니다.';
+        if ($('appShell').hidden) {
+          $('loginError').textContent = message;
+        } else {
+          showLogin();
+          session = null;
+          sessionStorage.removeItem(SESSION_KEY);
+          $('loginError').textContent = message;
+        }
+      } finally {
+        $('loginButton').disabled = false;
+        $('signupButton').disabled = false;
+      }
+    }
+
+    async function logout() {
+      closeProfileMenu();
+      if (unsubscribeState) {
+        unsubscribeState();
+        unsubscribeState = null;
+      }
+      sessionStorage.removeItem(SESSION_KEY);
+      try { await storageProvider.logout(); } catch {}
+      session = null;
+      accountProfile = null;
+      state = normalizeState(defaultState());
+      showLogin();
+    }
+    function showLogin() { $('loginScreen').hidden = false; $('appShell').hidden = true; closeProfileMenu(); }
+
+    function familyDisplayName() {
+      const fromSession = String(session?.householdName || '').trim();
+      const fromState = String(state.householdName || '').trim();
+      const name = fromSession || fromState;
+      if (!name || name === 'ForHome') return '우리집 히어로';
+      return name;
+    }
+
+    function updateHeader() {
+      $('familyName').textContent = familyDisplayName();
+      const acc = account(session?.accountId);
+      const m = member(acc?.memberId);
+      const mark = session?.memberEmoji || m?.emoji || (session?.displayName || acc?.displayName || acc?.id || 'AD').slice(0, 2).toUpperCase();
+      const label = session?.displayName || acc?.displayName || acc?.id || session?.accountId || 'user';
+      $('currentUser').innerHTML = `${escapeHtml(mark)} <span class="ellipsis">${escapeHtml(label)}</span> <span class="chev" aria-hidden="true">▾</span>`;
+    }
+
+    function toggleProfileMenu(forceOpen) {
+      profileMenuOpen = typeof forceOpen === 'boolean' ? forceOpen : !profileMenuOpen;
+      $('userDropdown').hidden = !profileMenuOpen;
+      $('currentUser').setAttribute('aria-expanded', profileMenuOpen ? 'true' : 'false');
+    }
+
+    function closeProfileMenu() {
+      if (!profileMenuOpen) return;
+      toggleProfileMenu(false);
+    }
+
+    async function openAccountSettings() {
+      activeTab = 'account';
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === 'section-account'));
+      try {
+        accountProfile = await storageProvider.getProfile();
+      } catch (err) {
+        accountProfile = null;
+        toast(`계정 정보를 불러오지 못했습니다: ${err.message}`);
+      }
+      render();
+    }
+
+    function showApp() {
+      $('loginScreen').hidden = true;
+      $('appShell').hidden = false;
+      updateHeader();
+      if (!selectedMemberId) selectedMemberId = firstAllowedMember()?.id || state.members[0]?.id;
+      if (!badgeMemberId) badgeMemberId = selectedMemberId || state.members[0]?.id;
+      render();
+    }
+
+    function showTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === `section-${tab}`));
+      render();
+    }
+
+    function render() {
+      if ($('appShell').hidden) return;
+      if (activeTab === 'home') renderHome();
+      if (activeTab === 'tasks') renderTasks();
+      if (activeTab === 'calendar') renderCalendar();
+      if (activeTab === 'badges') renderBadges();
+      if (activeTab === 'settings') renderSettings();
+      if (activeTab === 'account') renderAccount();
+      updateHeader();
+    }
+
+    function renderMemberRow(m) {
+      const fatigue = weekFatigue(m.id);
+      const pct = Math.min(100, Math.round(fatigue / state.settings.vacationThreshold * 100));
+      const tag = m.onVacation ? '<span class="tag amber">휴식 추천</span>' : `<span class="tag teal">${fatigue}P</span>`;
+      return `<div class="member-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(m.name)}</strong>${tag}</div><div class="progress"><span style="width:${pct}%;background:${pct >= 90 ? 'var(--red)' : 'var(--teal)'}"></span></div></div></div>`;
+    }
+    function renderRankRow(m, rank, weekly) {
+      return `<div class="rank-row"><span class="tag ${rank === 1 ? 'amber' : 'blue'}">${rank}</span><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(m.name)}</strong><span class="tag teal">${xpFor(m, weekly)}XP</span></div><div class="mini">${countFor(m, weekly)} tasks</div></div></div>`;
+    }
+    function renderMessage(msg) {
+      const from = member(msg.fromId);
+      const to = msg.toId ? member(msg.toId) : null;
+      return `<div class="message-row"><div class="name-line"><strong>${escapeHtml(from?.emoji || 'AD')} ${escapeHtml(from?.name || msg.fromId)}</strong><span class="mini">${formatTime(msg.timestamp)}</span></div><div>${escapeHtml(msg.text)}</div><div class="mini">받는 사람: ${to ? `${escapeHtml(to.emoji)} ${escapeHtml(to.name)}` : '전체'}</div></div>`;
+    }
+    function renderMemberSelect(m) {
+      const disabled = !canActAs(m);
+      return `<button class="select-card ${selectedMemberId === m.id ? 'active' : ''} ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} onclick="selectMember('${m.id}')"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div><strong>${escapeHtml(m.name)}</strong><div class="mini">${memberRole(m) === 'adult' ? '성인 권한' : '아이 권한'}</div></div></button>`;
+    }
+    function renderChoreSelect(c) {
+      const cat = CAT_TOKENS[c.category] || { label: CATEGORIES[c.category] || c.category, emoji: c.emoji, tile: '#F2EFF5', text: '#7C7589' };
+      const icon = cat.emoji !== c.emoji ? `${cat.emoji} ${escapeHtml(c.emoji)}` : escapeHtml(c.emoji);
+      return `<button class="chore-row chore-card ${selectedChoreId === c.id ? 'active' : ''}" onclick="selectChore('${c.id}')"><span class="chore-icon" style="background:${cat.tile}">${icon}</span><span class="ellipsis"><strong>${escapeHtml(c.name)}</strong><br><span class="mini" style="color:${cat.text};font-weight:800;">${escapeHtml(cat.label)}</span></span><span class="point-chip">${c.fatigue}P</span></button>`;
+    }
+
+    function renderDay(d, currentMonth) {
+      const key = dateKey(d.getTime());
+      const entries = entriesByDate(key);
+      const sessions = careSessionsFor(key);
+      const acceptedPlans = plansForDate(key).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
+      const classes = ['day'];
+      if (d.getMonth() !== currentMonth) classes.push('out');
+      if (key === dateKey(nowMs())) classes.push('today');
+      if (key === selectedDate) classes.push('active');
+      return `<button class="${classes.join(' ')}" onclick="selectDate('${key}')"><strong>${d.getDate()}</strong><div class="dot-row">${entries.slice(0, 5).map(() => '<span class="dot"></span>').join('')}${sessions.slice(0, 2).map(() => '<span class="dot teal"></span>').join('')}${acceptedPlans.slice(0, 2).map(() => '<span class="dot blue"></span>').join('')}</div></button>`;
+    }
+
+    function selectMember(id) { selectedMemberId = id; renderTasks(); }
+    function selectChore(id) { selectedChoreId = id; renderTasks(); }
+    function setCategory(id) { selectedCategory = id; selectedChoreId = null; renderTasks(); }
+    function selectDate(key) { selectedDate = key; renderCalendar(); }
+    function selectBadgeMember(id) { badgeMemberId = id; renderBadges(); }
+    function moveMonth(delta) { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + delta, 1); renderCalendar(); }
+
+    async function sendMessage() {
+      const text = $('messageText').value.trim();
+      if (!text) return toast('메시지를 입력해 주세요');
+      const acc = account(session.accountId);
+      const fromId = acc?.memberId || 'admin';
+      state.messages.push({ id: `msg${Date.now()}`, fromId, toId: $('messageTo').value || null, text, timestamp: Date.now() });
+      grantBadges(member(fromId));
+      await saveState(false);
+      toast('메시지를 보냈습니다');
+    }
+
+    async function saveSettings() {
+      state.settings.vacationThreshold = clamp(Number($('vacationThreshold').value || 25), 5, 100);
+      state.settings.weekStartsOn = Number($('weekStartsOn').value);
+      await saveState();
+    }
+    async function addMember() {
+      const name = $('memberName').value.trim();
+      if (!name) return toast('이름을 입력해 주세요');
+      const id = `m${Date.now()}`;
+      const role = $('memberRole')?.value || 'adult';
+      const next = memberSeed(id, name, $('memberEmoji').value.trim() || 'U', role === 'adult', randomColor());
+      next.role = role;
+      state.members.push(next);
+      await saveState();
+    }
+    async function removeMember(id) {
+      if (!confirm('가족을 삭제할까요?')) return;
+      state.members = state.members.filter(m => m.id !== id);
+      state.history = state.history.filter(h => h.memberId !== id);
+      state.messages = state.messages.filter(m => m.fromId !== id && m.toId !== id);
+      state.tomorrowPlans = state.tomorrowPlans.filter(p => p.fromId !== id && p.toId !== id);
+      state.careAssignments = state.careAssignments.filter(a => a.morningId !== id && a.eveningId !== id);
+      state.careSessions = state.careSessions.filter(s => s.memberId !== id);
+      state.accounts = state.accounts.map(a => a.memberId === id ? { ...a, memberId: null, isAdmin: true } : a);
+      await saveState();
+    }
+    async function addChore() {
+      const name = $('choreName').value.trim();
+      if (!name) return toast('집안일 이름을 입력해 주세요');
+      const fatigue = clamp(Number($('choreFatigue').value || 2), 1, 10);
+      await createChangeRequest('chore.add', null, choreSeed(`c${Date.now()}`, name, $('choreEmoji').value.trim() || 'OK', fatigue, $('choreCategory').value));
+    }
+    async function removeChore(id) {
+      if (!confirm('집안일을 삭제할까요?')) return;
+      const before = chore(id);
+      if (!before) return;
+      await createChangeRequest('chore.delete', before, null);
+    }
+    async function addCareItem() {
+      const name = $('careItemName')?.value.trim();
+      if (!name) return toast('육아 항목 이름을 입력해 주세요');
+      const points = clamp(Number($('careItemPoints')?.value || 2), 1, 100);
+      const next = careItemSeed(`careItem${Date.now()}`, name, $('careItemEmoji')?.value.trim() || 'CA', points);
+      await createChangeRequest('care.add', null, next);
+    }
+    async function removeCareItem(id) {
+      if (id === 'edu') return toast('교육 항목은 기본 항목이라 삭제할 수 없습니다');
+      if (!confirm('육아 항목을 삭제할까요?')) return;
+      const before = careItem(id);
+      if (!before) return;
+      await createChangeRequest('care.delete', before, null);
+    }
+    async function createChangeRequest(type, before, after) {
+      const reviewers = requiredChangeReviewers();
+      const request = {
+        id: `chg${Date.now()}`,
+        type,
+        before,
+        after,
+        requestedBy: currentMemberId() || 'admin',
+        requestedAt: Date.now(),
+        status: reviewers.length ? 'pending' : 'approved',
+        reviewedAt: reviewers.length ? null : Date.now(),
+        reviewNote: '',
+        appliedAt: null,
+        approvalRequests: reviewers.map(reviewerId => ({ reviewerId, status: 'pending', reviewedAt: null, reviewNote: '' }))
+      };
+      state.changeRequests.push(request);
+      if (!reviewers.length) applyChangeRequest(request);
+      await saveStateOptimistic(reviewers.length ? '변경 승인 요청을 보냈습니다' : '변경 사항을 반영했습니다');
+    }
+    async function addAccount() {
+      const id = $('accountId').value.trim();
+      const pw = $('accountPw').value.trim();
+      const memberId = $('accountMember').value || null;
+      if (!id || !pw) return toast('아이디와 비밀번호를 입력해 주세요');
+      if (state.accounts.some(a => a.id === id)) return toast('이미 있는 계정입니다');
+      state.accounts.push({ id, password: pw, memberId, isAdmin: !memberId });
+      await saveState();
+    }
+    async function removeAccount(id) {
+      if (id === session.accountId) return toast('현재 로그인한 계정은 삭제할 수 없습니다');
+      if (!confirm('계정을 삭제할까요?')) return;
+      state.accounts = state.accounts.filter(a => a.id !== id);
+      await saveState();
+    }
+    async function resetWeek() {
+      if (!confirm('이번 주 기록을 삭제할까요?')) return;
+      const ws = weekStartTs();
+      state.history = state.history.filter(h => Number(h.timestamp) < ws);
+      state.badgeHistory = state.badgeHistory.filter(h => Number(h.timestamp) < ws);
+      applyMemberTotals();
+      await saveState();
+    }
+    async function resetAll() {
+      if (!confirm('전체 앱 데이터를 초기화할까요?')) return;
+      state = defaultState();
+      await saveState(false);
+      await logout();
+    }
+    async function exportDailySummary() {
+      const summary = buildDailySummary();
+      localStorage.setItem('forhome-last-daily-summary', JSON.stringify(summary));
+      toast('오늘 요약을 준비했습니다');
+    }
+
+    function messageOptions() { return `<option value="">전체</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.emoji)} ${escapeHtml(m.name)}</option>`).join('')}`; }
+    function memberRole(m) {
+      const role = m?.role || (m?.id === 'son' ? 'child' : 'adult');
+      if (role === 'owner' || role === 'hero') return 'adult';
+      if (role === 'care_member') return 'child';
+      return role;
+    }
+    function adultMembers() { return state.members.filter(m => memberRole(m) === 'adult'); }
+    function childMembers() { return state.members.filter(m => memberRole(m) === 'child'); }
+    function isAdultMember(id) { return adultMembers().some(m => m.id === id); }
+    function parentMembers() { return adultMembers().length ? adultMembers() : PARENT_IDS.map(id => member(id)).filter(Boolean); }
+    function parentOptions(selected = '') { return parentMembers().map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join(''); }
+    function childOptions(selected = '') { return childMembers().map(m => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join(''); }
+    function careItem(id) { return (state.careItems || []).find(item => item.id === id); }
+    function careItemOptions(selected = 'edu') { return (state.careItems || []).map(item => `<option value="${item.id}" ${item.id === selected ? 'selected' : ''}>${escapeHtml(item.emoji)} ${escapeHtml(item.name)} (${item.points}P)</option>`).join(''); }
+    function firstAllowedMember() { return state.members.find(canActAs); }
+    function canActAs(m) {
+      if (!m || !session) return false;
+      if (session.isAdmin) return true;
+      if (session.memberId === m.id) return true;
+      return !m.restricted;
+    }
+    function canEditCare() { return !!session && (session.isAdmin || isAdultMember(session.memberId)); }
+    function canRespondPlan(plan) { return !!session && (session.isAdmin || plan.toId === session.memberId); }
+    function account(id) { return state.accounts.find(a => a.id === id); }
+    function member(id) { return state.members.find(m => m.id === id); }
+    function chore(id) { return state.chores.find(c => c.id === id); }
+    function isAwardedTo(item, memberId) { return item?.memberId === memberId || (Array.isArray(item?.pointRecipients) && item.pointRecipients.includes(memberId)); }
+    function countFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).length : 0; }
+    function xpFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).reduce((s, x) => s + Number(x.xpEarned || 0), 0) : 0; }
+    function fatigueFor(m, h) { return m ? h.filter(x => isAwardedTo(x, m.id)).reduce((s, x) => s + Number(x.fatigueAdded || x.points || 0), 0) : 0; }
+    function weekFatigue(memberId) { return weekHistory().filter(x => isAwardedTo(x, memberId)).reduce((s, x) => s + Number(x.fatigueAdded || x.points || 0), 0); }
+    function weekHistory() {
+      const ws = weekStartTs();
+      return state.history.filter(h => Number(h.timestamp) >= ws).concat(carePointEntries().filter(h => Number(h.timestamp) >= ws));
+    }
+    function weekStartTs() { return weekStartTsFor(state); }
+    function weekStartTsFor(target) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      const startsOn = Number(target.settings?.weekStartsOn ?? 1);
+      const diff = (d.getDay() - startsOn + 7) % 7;
+      d.setDate(d.getDate() - diff);
+      return d.getTime();
+    }
+    function entriesByDate(key) { return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => a.timestamp - b.timestamp); }
+    function plansForDate(key) { return state.tomorrowPlans.filter(p => p.targetDate === key).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)); }
+    function careAssignmentFor(key) { return state.careAssignments.find(a => a.date === key) || { date: key, morningId: 'mom', eveningId: 'dad', updatedAt: null }; }
+    function careSessionsFor(key) { return state.careSessions.filter(s => s.date === key).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime))); }
+    function carePointEntries() {
+      return (state.careSessions || []).map(s => ({
+        id: s.id,
+        memberId: s.memberId,
+        pointRecipients: Array.isArray(s.pointRecipients) ? s.pointRecipients : [s.memberId],
+        fatigueAdded: Number(s.points || 0),
+        xpEarned: Number(s.xpEarned || 0),
+        timestamp: s.createdAt || nowMs(),
+        verificationStatus: 'approved',
+        category: 'care'
+      }));
+    }
+    function careMinutesFor(key) { return careSessionsFor(key).reduce((sum, s) => sum + Number(s.minutes || 0), 0); }
+    function careMinutesByMember(key) {
+      const result = {};
+      careSessionsFor(key).forEach(s => { result[s.memberId] = (result[s.memberId] || 0) + Number(s.minutes || 0); });
+      return result;
+    }
+    function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    function nowMs() { return FORCED_NOW ? new Date(FORCED_NOW).getTime() : Date.now(); }
+    function dateKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+    function addDaysKey(key, days) { const d = new Date(`${key}T00:00:00`); d.setDate(d.getDate() + days); return dateKey(d.getTime()); }
+    function formatClock(ts) { return new Date(Number(ts)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }); }
+    function formatTime(ts) { return `${dateKey(ts)} ${formatClock(ts)}`; }
+    function formatMinutes(minutes) {
+      const value = Math.max(0, Number(minutes || 0));
+      const h = Math.floor(value / 60);
+      const m = value % 60;
+      if (h && m) return `${h}시간 ${m}분`;
+      if (h) return `${h}시간`;
+      return `${m}분`;
+    }
+    function minutesBetween(start, end) {
+      const [sh, sm] = String(start || '00:00').split(':').map(Number);
+      const [eh, em] = String(end || '00:00').split(':').map(Number);
+      return (eh * 60 + em) - (sh * 60 + sm);
+    }
+    function readJson(text) { try { return JSON.parse(text); } catch { return null; } }
+    function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
+    function clamp(n, min, max) { return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min)); }
+    function softColor(color = '#2563eb') { return `${color}18`; }
+    function randomColor() { return ['#2563eb', '#0f9f8f', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'][Math.floor(Math.random() * 6)]; }
+    function setStatus(text) {
+      const el = $('syncStatus');
+      if (!el) return;
+      const surface = SURFACE_MODE === 'mobile' ? '모바일' : '웹';
+      el.textContent = `${surface} / ${text} / ${storageProvider?.label || '시작 중'}`;
+    }
+    function toast(text) {
+      const el = $('toast');
+      el.textContent = text;
+      el.classList.add('show');
+      clearTimeout(el.timer);
+      el.timer = setTimeout(() => el.classList.remove('show'), 2400);
+    }
+    function showSuccess(emoji, title, message) {
+      $('successEmoji').textContent = emoji;
+      $('successTitle').textContent = title;
+      $('successMessage').textContent = message;
+      $('successOverlay').hidden = false;
+    }
+
+    let currentProof = null;
+    let currentProofPromise = null;
+    const REVIEW_STATUS = {
+      pending: { label: '확인 대기', className: 'amber' },
+      approved: { label: '확인 완료', className: 'teal' },
+      rejected: { label: '다시 확인 요청', className: 'red' }
+    };
+    const REQUEST_STATUS = {
+      pending: { label: '승인 대기', className: 'amber' },
+      accepted: { label: '오늘 할 일', className: 'teal' },
+      declined: { label: '거절됨', className: 'red' }
+    };
+
+    function requiredReviewersFor(memberId, category) {
+      const adults = parentMembers().map(m => m.id).filter(id => id !== memberId);
+      const actor = member(memberId);
+      if (category === 'child' && memberRole(actor) === 'child') return adults;
+      if (memberId === 'mom' && member('dad')) return ['dad'];
+      if (memberId === 'dad' && member('mom')) return ['mom'];
+      if (category === 'child') return adults;
+      return reviewableMembers(memberId).slice(0, 1).map(m => m.id);
+    }
+
+    function approvalStatusFor(entry) {
+      const requests = Array.isArray(entry.approvalRequests) ? entry.approvalRequests : [];
+      if (!requests.length) return 'approved';
+      if (requests.some(r => r.status === 'rejected')) return 'rejected';
+      if (requests.every(r => r.status === 'approved')) return 'approved';
+      return 'pending';
+    }
+
+    function syncEntryReviewStatus(entry) {
+      entry.verificationStatus = approvalStatusFor(entry);
+      const first = entry.approvalRequests?.[0];
+      entry.reviewerId = first?.reviewerId || entry.reviewerId || null;
+      const latestReviewed = [...(entry.approvalRequests || [])].filter(r => r.reviewedAt).sort((a, b) => Number(b.reviewedAt) - Number(a.reviewedAt))[0];
+      entry.reviewedBy = latestReviewed?.reviewerId || entry.reviewedBy || null;
+      entry.reviewedAt = latestReviewed?.reviewedAt || entry.reviewedAt || null;
+      entry.reviewNote = latestReviewed?.reviewNote || entry.reviewNote || '';
+      return entry.verificationStatus;
+    }
+
+    function requestMeta(status) { return REQUEST_STATUS[status] || REQUEST_STATUS.pending; }
+
+    function reviewProgressText(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '확인 없이 공유됨';
+      return requests.map(r => {
+        const name = member(r.reviewerId)?.name || r.reviewerId;
+        if (r.status === 'approved') return `${name} 확인 완료`;
+        if (r.status === 'rejected') return `${name} 다시 확인 요청`;
+        return `${name} 확인 대기`;
+      }).join(', ');
+    }
+
+    function reviewTargetsFor(entry) {
+      const requests = entry.approvalRequests || [];
+      if (session?.isAdmin) return requests.filter(r => r.status === 'pending');
+      return requests.filter(r => r.reviewerId === session?.memberId && r.status === 'pending');
+    }
+
+    function promptRequired(title, defaultValue) {
+      let value = prompt(title, defaultValue);
+      if (value === null) return '';
+      value = value.trim();
+      while (!value) {
+        value = prompt('이유를 입력해 주세요', defaultValue);
+        if (value === null) return '';
+        value = value.trim();
+      }
+      return value;
+    }
+
+    function normalizeState(next) {
+      const base = defaultState();
+      const merged = { ...base, ...(next || {}) };
+      merged.settings = { ...base.settings, ...(next?.settings || {}) };
+      merged.householdName = String(next?.householdName || base.householdName || '우리집 히어로').trim() || '우리집 히어로';
+      merged.members = Array.isArray(next?.members) ? next.members.map(m => ({ ...memberSeed(m.id, m.name, m.emoji, !!m.restricted, m.color || '#2563eb'), ...m, role: m.role || (m.id === 'son' ? 'child' : 'adult') })) : base.members;
+      merged.chores = Array.isArray(next?.chores) ? next.chores.map(c => ({ ...c, xp: Number(c.xp || c.fatigue * 10) })) : base.chores;
+      base.chores.forEach(seed => {
+        if (!merged.chores.some(c => c.id === seed.id)) merged.chores.push(seed);
+      });
+      merged.accounts = Array.isArray(next?.accounts) && next.accounts.length ? next.accounts : base.accounts;
+      merged.history = Array.isArray(next?.history) ? next.history.map(normalizeHistoryEntry) : [];
+      merged.messages = Array.isArray(next?.messages) ? next.messages : [];
+      merged.tomorrowPlans = Array.isArray(next?.tomorrowPlans) ? next.tomorrowPlans.map(normalizePlan) : [];
+      merged.careAssignments = Array.isArray(next?.careAssignments) ? next.careAssignments.map(normalizeCareAssignment) : [];
+      merged.careSessions = Array.isArray(next?.careSessions) ? next.careSessions.map(normalizeCareSession).filter(Boolean) : [];
+      merged.careItems = Array.isArray(next?.careItems) ? next.careItems.map(normalizeCareItem).filter(Boolean) : base.careItems;
+      base.careItems.forEach(seed => {
+        if (!merged.careItems.some(item => item.id === seed.id)) merged.careItems.push(seed);
+      });
+      merged.changeRequests = Array.isArray(next?.changeRequests) ? next.changeRequests.map(normalizeChangeRequest).filter(Boolean) : [];
+      merged.badgeHistory = Array.isArray(next?.badgeHistory) ? next.badgeHistory : [];
+      updateVacationFlags(merged);
+      return merged;
+    }
+
+    function normalizeHistoryEntry(entry) {
+      const requests = normalizeApprovalRequests(entry);
+      const normalized = {
+        reviewerId: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: '',
+        proofImage: '',
+        proofImageName: '',
+        hasProofImage: !!entry?.hasProofImage,
+        proofCaption: '',
+        proofAnalysis: '',
+        ...entry,
+        approvalRequests: requests
+      };
+      syncEntryReviewStatus(normalized);
+      return normalized;
+    }
+
+    function normalizeApprovalRequests(entry) {
+      if (Array.isArray(entry?.approvalRequests) && entry.approvalRequests.length) {
+        return entry.approvalRequests.map(r => ({
+          reviewerId: r.reviewerId,
+          status: r.status || 'pending',
+          reviewedAt: r.reviewedAt || null,
+          reviewNote: r.reviewNote || ''
+        })).filter(r => r.reviewerId);
+      }
+      const required = requiredReviewersFor(entry?.memberId, entry?.category);
+      const fallback = entry?.reviewerId ? [entry.reviewerId] : required;
+      return [...new Set(fallback.filter(Boolean))].map(id => ({
+        reviewerId: id,
+        status: entry?.verificationStatus === 'approved' || entry?.reviewedAt ? 'approved' : (entry?.verificationStatus === 'rejected' ? 'rejected' : 'pending'),
+        reviewedAt: entry?.reviewedAt || null,
+        reviewNote: entry?.reviewNote || ''
+      }));
+    }
+
+    function normalizePlan(plan) {
+      const requestStatus = plan.requestStatus || (plan.status === 'closed' ? 'accepted' : 'accepted');
+      return { status: 'open', requestStatus, note: '', declineReason: '', respondedAt: null, createdAt: Date.now(), ...plan, requestStatus };
+    }
+
+    function normalizeCareItem(item) {
+      if (!item?.id || !item?.name) return null;
+      const points = clamp(Number(item.points || item.fatigue || 1), 1, 100);
+      return { id: item.id, name: item.name, emoji: item.emoji || 'CA', points, xp: Number(item.xp || points * 10) };
+    }
+
+    function normalizeChangeRequest(request) {
+      if (!request?.id || !request?.type) return null;
+      const normalized = {
+        before: null,
+        after: null,
+        requestedBy: null,
+        requestedAt: Date.now(),
+        status: 'pending',
+        reviewedAt: null,
+        reviewNote: '',
+        appliedAt: null,
+        approvalRequests: [],
+        ...request
+      };
+      normalized.approvalRequests = Array.isArray(request.approvalRequests)
+        ? request.approvalRequests.map(r => ({ reviewerId: r.reviewerId, status: r.status || 'pending', reviewedAt: r.reviewedAt || null, reviewNote: r.reviewNote || '' })).filter(r => r.reviewerId)
+        : [];
+      return normalized;
+    }
+
+    function normalizeCareAssignment(item) {
+      return {
+        date: item.date || dateKey(nowMs()),
+        morningId: isAdultMember(item.morningId) ? item.morningId : (parentMembers()[0]?.id || 'mom'),
+        eveningId: isAdultMember(item.eveningId) ? item.eveningId : (parentMembers()[1]?.id || parentMembers()[0]?.id || 'dad'),
+        updatedAt: item.updatedAt || null
+      };
+    }
+
+    function normalizeCareSession(item) {
+      if (!item?.memberId || !isAdultMember(item.memberId)) return null;
+      const minutes = Number(item.minutes || minutesBetween(item.startTime, item.endTime) || 0);
+      const selectedCareItem = careItem(item.careItemId) || careItem('edu') || (state.careItems || [])[0];
+      return {
+        id: item.id || `care${Date.now()}`,
+        date: item.date || dateKey(item.timestamp || nowMs()),
+        memberId: item.memberId,
+        careItemId: selectedCareItem?.id || item.careItemId || 'edu',
+        childMemberId: item.childMemberId || childMembers()[0]?.id || '',
+        pointRecipients: Array.isArray(item.pointRecipients) ? item.pointRecipients : [item.memberId],
+        points: Number(item.points || selectedCareItem?.points || 0),
+        xpEarned: Number(item.xpEarned || selectedCareItem?.xp || 0),
+        startTime: item.startTime || '09:00',
+        endTime: item.endTime || '10:00',
+        minutes: Math.max(0, minutes),
+        note: item.note || '',
+        createdAt: item.createdAt || item.timestamp || Date.now()
+      };
+    }
+
+    function formatBriefingHeader() {
+      const acc = account(session?.accountId);
+      const m = member(acc?.memberId);
+      const name = session?.displayName || m?.name || acc?.id || '가족';
+      const d = new Date(nowMs());
+      const dateStr = d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' });
+      return { dateStr, name };
+    }
+
+    function currentUserHeroPoints() {
+      const acc = account(session?.accountId);
+      const m = member(acc?.memberId);
+      if (!m) return '0P';
+      const weekly = weekHistory();
+      const pts = fatigueFor(m, weekly);
+      return `${pts}P`;
+    }
+
+    function renderHome() {
+      const today = todayHistory();
+      const approved = today.filter(x => x.verificationStatus === 'approved');
+      const todayPending = today.filter(x => x.verificationStatus === 'pending');
+      const leader = workRanking(approved)[0];
+      const todayKeyValue = dateKey(nowMs());
+      const todayPlans = plansForDate(todayKeyValue).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
+      const briefing = buildMorningBriefing(todayKeyValue);
+      const header = formatBriefingHeader();
+      $('section-home').innerHTML = `
+        <div class="grid">
+          <div class="briefing-header">
+            <div>
+              <div class="briefing-date">${escapeHtml(header.dateStr)}</div>
+              <div class="briefing-greeting">안녕하세요, ${escapeHtml(header.name)}님 👋</div>
+            </div>
+            <span class="point-chip">🪙 ${escapeHtml(currentUserHeroPoints())}</span>
+          </div>
+          <div class="point-hero">
+            <div>
+              <div class="point-hero-label">이번 주 내 포인트</div>
+              <div class="point-hero-value">${escapeHtml(currentUserHeroPoints())}</div>
+            </div>
+            <div class="point-hero-coin">🪙</div>
+          </div>
+          ${shouldShowMorningBriefing() ? renderBriefingPanel(briefing) : ''}
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">오늘 요약</div><span class="tag blue no-dot">v${state.version || 0}</span></div>
+            <div class="metric-row">
+              <div class="stat-card"><span>오늘 기록</span><strong>${today.length}</strong></div>
+              <div class="stat-card"><span>확인 완료</span><strong>${approved.length}</strong></div>
+              <div class="stat-card"><span>부모 확인 대기</span><strong>${todayPending.length}</strong></div>
+            </div>
+          </div>
+          <div class="panel span-7">
+            <div class="panel-head"><div class="panel-title">오늘의 수고 균형</div><span class="mini">확인 완료 기준</span></div>
+            ${leader ? `<div class="rank-row"><div class="avatar" style="background:${softColor(leader.member?.color)}">${escapeHtml(leader.member?.emoji || '')}</div><div class="grow"><div class="name-line"><strong>${escapeHtml(leader.member?.name || '알 수 없음')}님의 수고 포인트가 쌓였어요</strong><span class="tag teal">${leader.count}건 · ${leader.load}P</span></div><div class="mini">확인된 일: ${leader.items.map(x => escapeHtml(x.choreName)).join(', ')}</div></div></div>` : '<div class="empty"><span class="empty-emoji">🎉</span>아직 확인 완료된 기록이 없어요</div>'}
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">오늘 가족 피드</div><span class="mini">확인 완료된 기록</span></div>
+            <div class="list">${approved.length ? approved.map(renderActivity).join('') : '<div class="empty"><span class="empty-emoji">📋</span>아직 가족 피드에 올라온 확인 완료 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">확인이 필요해요</div><span class="tag amber">${todayPending.length}</span></div>
+            <div class="list">${todayPending.length ? todayPending.map(renderActivity).join('') : '<div class="empty"><span class="empty-emoji">✨</span>오늘 확인을 기다리는 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">오늘 해야 할 일</div><span class="tag gray no-dot">${todayPlans.length}건</span></div>
+            <div class="list">${todayPlans.length ? todayPlans.map(renderPlan).join('') : '<div class="empty"><span class="empty-emoji">🎉</span>오늘 할 일을 모두 끝냈어요!</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function shouldShowMorningBriefing() {
+      return new Date(nowMs()).getHours() >= BRIEFING_HOUR;
+    }
+
+    function renderBriefingPanel(summary) {
+      const yesterdayTasks = summary.yesterdayTasks.length
+        ? summary.yesterdayTasks.map(h => `<div class="briefing-item"><strong>${escapeHtml(member(h.memberId)?.name || h.memberId)} · ${escapeHtml(h.choreName)}</strong><div class="mini">${statusMeta(h.verificationStatus).label} · ${approvalSummary(h)}</div></div>`).join('')
+        : '<div class="empty">어제 기록된 일이 없어요</div>';
+      const care = summary.yesterdayCare.length
+        ? summary.yesterdayCare.map(s => `<div class="briefing-item"><strong>${escapeHtml(member(s.memberId)?.name || s.memberId)}</strong><div class="mini">${s.startTime}-${s.endTime} · ${formatMinutes(s.minutes)}${s.note ? ` · ${escapeHtml(s.note)}` : ''}</div></div>`).join('')
+        : '<div class="empty">어제 육아 시간 기록이 없어요</div>';
+      const todayPlans = summary.todayPlans.length
+        ? summary.todayPlans.map(renderPlan).join('')
+        : '<div class="empty">승인된 오늘 할 일이 없어요</div>';
+      const pending = summary.pendingRequests.length
+        ? summary.pendingRequests.map(renderPlan).join('')
+        : '<div class="empty">승인 대기 중인 오늘 할 일 요청이 없어요</div>';
+      return `
+        <div class="panel span-12" data-testid="morning-briefing">
+          <div class="panel-head"><div class="panel-title">아침 7시 브리핑</div><span class="tag blue">${summary.date}</span></div>
+          <div class="grid">
+            <div class="span-6">
+              <div class="mini">어제 한 일</div>
+              <div class="briefing-list">${yesterdayTasks}</div>
+            </div>
+            <div class="span-6">
+              <div class="mini">어제 육아 시간</div>
+              <div class="briefing-list">${care}</div>
+            </div>
+            <div class="span-6">
+              <div class="mini">오늘 담당</div>
+              <div class="briefing-list"><div class="briefing-item">아침 ${escapeHtml(member(summary.assignment.morningId)?.name || '미정')} · 저녁 ${escapeHtml(member(summary.assignment.eveningId)?.name || '미정')}</div></div>
+            </div>
+            <div class="span-6">
+              <div class="mini">오늘 해야 할 일</div>
+              <div class="briefing-list">${todayPlans}</div>
+            </div>
+            <div class="span-12">
+              <div class="mini">승인 대기 요청</div>
+              <div class="briefing-list">${pending}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function renderTasks() {
+      const allowed = firstAllowedMember();
+      if (!selectedMemberId || !canActAs(member(selectedMemberId))) selectedMemberId = allowed?.id || state.members[0]?.id;
+      const chores = state.chores.filter(c => selectedCategory === 'all' || c.category === selectedCategory);
+      if (!selectedChoreId || !chores.find(c => c.id === selectedChoreId)) selectedChoreId = chores[0]?.id || null;
+      const selectedChore = chore(selectedChoreId);
+      const reviewers = requiredReviewersFor(selectedMemberId, selectedChore?.category);
+      const reviewerText = reviewers.length ? reviewers.map(id => member(id)?.name || id).join(', ') : '자동 승인';
+      $('section-tasks').innerHTML = `
+        <div class="grid">
+          <div class="screen-hero">
+            <span class="tag teal">사진 인증</span>
+            <h2>집안일을 골라서 인증해요</h2>
+            <p>사진과 메모로 완료를 기록하고, 가족의 확인을 받으면 포인트가 쌓여요.</p>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">누가 했나요</div></div>
+            <div class="selector-grid">${state.members.map(renderMemberSelect).join('')}</div>
+          </div>
+          <div class="panel span-7">
+            <div class="panel-head"><div class="panel-title">집안일 목록 카드</div><span class="mini">큰 카드를 눌러 선택</span></div>
+            <div class="segmented" style="margin-bottom:10px;">${Object.entries(CATEGORIES).map(([id, label]) => `<button class="chip ${selectedCategory === id ? 'active' : ''}" onclick="setCategory('${id}')">${label}</button>`).join('')}</div>
+            <div class="list" data-testid="chore-list">${chores.map(renderChoreSelect).join('')}</div>
+          </div>
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">사진 업로드 인증</div><span class="tag amber">${selectedChore ? `${selectedChore.fatigue}P` : '선택 필요'}</span></div>
+            <div class="briefing-item" data-testid="auto-reviewers"><strong>자동 확인자</strong><div class="mini">${escapeHtml(reviewerText)}</div></div>
+            <div class="field upload-zone">
+              <label for="proofPhoto">사진</label>
+              <input id="proofPhoto" data-testid="proof-photo" type="file" accept="image/*" capture="environment" onchange="handleProofSelected(event)">
+              <img id="proofPreview" class="proof-preview" hidden alt="증빙 사진">
+              <div class="mini" id="proofStatus">사진 없음</div>
+            </div>
+            <div class="ai-result-card">
+              <strong>AI 분석 결과</strong>
+              <div class="mini" id="aiAnalysisText">사진을 올리면 크기와 파일 정보를 분석해서 보여줍니다.</div>
+            </div>
+            <div class="field">
+              <label for="proofCaption">메모</label>
+              <textarea id="proofCaption" data-testid="proof-caption" placeholder="예: 싱크대 정리까지 끝냈음"></textarea>
+            </div>
+            <button class="btn primary full kid" data-testid="complete-task" onclick="completeTask()">확인 요청 보내기 ✓</button>
+          </div>
+        </div>`;
+      currentProof = null;
+      currentProofPromise = null;
+    }
+
+    function renderBadges() {
+      const pending = pendingReviews();
+      const pendingChanges = pendingChangeRequests();
+      const mine = state.history
+        .filter(h => session?.isAdmin || h.approvalRequests?.some(r => r.reviewerId === currentMemberId()))
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 30);
+      $('section-badges').innerHTML = `
+        <div class="grid">
+          <div class="screen-hero">
+            <span class="tag red">승인 확인</span>
+            <h2>가족이 올린 인증을 확인해요</h2>
+            <p>사진과 메모를 보고 승인하거나 다시 확인을 요청할 수 있어요.</p>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">${session?.isAdmin ? '전체 확인 대기' : '내가 확인할 것'}</div><span class="tag amber">${pending.length}</span></div>
+            <div class="list">${pending.length ? pending.map(renderReviewItem).join('') : '<div class="empty">확인할 기록이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">설정 변경 승인</div><span class="tag amber">${pendingChanges.length}</span></div>
+            <div class="list">${pendingChanges.length ? pendingChanges.map(renderChangeRequestItem).join('') : '<div class="empty">승인할 설정 변경이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">최근 검토 기록</div></div>
+            <div class="list">${mine.length ? mine.map(renderActivity).join('') : '<div class="empty">검토 기록이 없어요</div>'}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderCalendar() {
+      const targetDate = selectedDate || dateKey(nowMs());
+      const plans = plansForDate(targetDate);
+      const acceptedPlans = plans.filter(p => p.requestStatus === 'accepted' && p.status !== 'closed');
+      const pendingPlans = plans.filter(p => p.requestStatus === 'pending');
+      const declinedPlans = plans.filter(p => p.requestStatus === 'declined');
+      const assignment = careAssignmentFor(targetDate);
+      const sessions = careSessionsFor(targetDate);
+      const minutesByMember = careMinutesByMember(targetDate);
+      const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+      const start = new Date(first);
+      const weekStart = Number(state.settings.weekStartsOn || 0);
+      start.setDate(1 - ((first.getDay() - weekStart + 7) % 7));
+      const days = Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        return d;
+      });
+      const weekLabels = weekStart === 1 ? ['월', '화', '수', '목', '금', '토', '일'] : ['일', '월', '화', '수', '목', '금', '토'];
+      $('section-calendar').innerHTML = `
+        <div class="grid">
+          <div class="panel span-7">
+            <div class="calendar-head">
+              <button class="btn icon" onclick="moveMonth(-1)">‹</button>
+              <div><strong>${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}</strong><div class="mini">${targetDate}</div></div>
+              <button class="btn icon" onclick="moveMonth(1)">›</button>
+            </div>
+            <div class="calendar-grid">${weekLabels.map(x => `<div class="weekday">${x}</div>`).join('')}${days.map(d => renderDay(d, calendarMonth.getMonth())).join('')}</div>
+          </div>
+          <div class="panel span-5">
+            <div class="panel-head"><div class="panel-title">할 일 요청</div><span class="tag blue">${targetDate}</span></div>
+            <div class="field"><label for="planDate">날짜</label><input id="planDate" data-testid="plan-date" type="date" value="${targetDate}"></div>
+            <div class="field"><label for="planTo">받는 사람</label><select id="planTo">${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="planChore">할 일</label><select id="planChore">${state.chores.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="planNote">메모</label><textarea id="planNote" data-testid="tomorrow-note" placeholder="예: 오전에 먼저 해주면 좋아"></textarea></div>
+            <button class="btn primary full" data-testid="add-tomorrow-plan" onclick="addTomorrowPlan()">할 일 요청 보내기</button>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">육아 담당</div><span class="tag">${targetDate}</span></div>
+            <div class="form-grid">
+              <div class="field col-6"><label for="careMorning">아침</label><select id="careMorning" data-testid="care-morning" ${canEditCare() ? '' : 'disabled'}>${parentOptions(assignment.morningId)}</select></div>
+              <div class="field col-6"><label for="careEvening">저녁</label><select id="careEvening" data-testid="care-evening" ${canEditCare() ? '' : 'disabled'}>${parentOptions(assignment.eveningId)}</select></div>
+              <button class="btn primary col-12" data-testid="save-care-assignment" ${canEditCare() ? '' : 'disabled'} onclick="saveCareAssignment()">담당 저장</button>
+            </div>
+            <div class="briefing-list">
+              ${parentMembers().map(m => `<div class="briefing-item"><strong>${escapeHtml(m.name)}</strong><div class="mini">${formatMinutes(minutesByMember[m.id] || 0)}</div></div>`).join('')}
+            </div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">아이 본 시간</div><span class="time-total">${formatMinutes(careMinutesFor(targetDate))}</span></div>
+            <div class="form-grid">
+              <div class="field col-4"><label for="careItem">항목</label><select id="careItem" data-testid="care-item" ${canEditCare() ? '' : 'disabled'}>${careItemOptions('edu')}</select></div>
+              <div class="field col-4"><label for="careMember">담당</label><select id="careMember" data-testid="care-member" ${canEditCare() ? '' : 'disabled'}>${parentOptions(currentMemberId() && isAdultMember(currentMemberId()) ? currentMemberId() : assignment.morningId)}</select></div>
+              <div class="field col-4"><label for="careChild">아이</label><select id="careChild" data-testid="care-child" ${canEditCare() ? '' : 'disabled'}>${childOptions(childMembers()[0]?.id || '')}</select></div>
+              <div class="field col-4"><label for="careStart">시작</label><input id="careStart" data-testid="care-start" type="time" value="09:00" ${canEditCare() ? '' : 'disabled'}></div>
+              <div class="field col-4"><label for="careEnd">종료</label><input id="careEnd" data-testid="care-end" type="time" value="10:00" ${canEditCare() ? '' : 'disabled'}></div>
+              <div class="field col-4"><label>포인트</label><input value="교육은 성인+아이 지급" disabled></div>
+              <div class="field col-12"><label for="careNote">메모</label><input id="careNote" data-testid="care-note" placeholder="예: 등원 준비와 아침 식사" ${canEditCare() ? '' : 'disabled'}></div>
+              <button class="btn primary col-12" data-testid="add-care-session" ${canEditCare() ? '' : 'disabled'} onclick="addCareSession()">육아 시간 추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${sessions.length ? sessions.map(renderCareSession).join('') : '<div class="empty">기록된 육아 시간이 없어요</div>'}</div>
+          </div>
+          <div class="panel span-12">
+            <div class="panel-head"><div class="panel-title">선택한 날짜의 할 일</div><span class="tag">${plans.length}</span></div>
+            <div class="grid">
+              <div class="span-4"><div class="mini">승인 대기</div><div class="list">${pendingPlans.length ? pendingPlans.map(renderPlan).join('') : '<div class="empty">대기 요청 없음</div>'}</div></div>
+              <div class="span-4"><div class="mini">오늘 할 일</div><div class="list">${acceptedPlans.length ? acceptedPlans.map(renderPlan).join('') : '<div class="empty">승인된 할 일 없음</div>'}</div></div>
+              <div class="span-4"><div class="mini">거절됨</div><div class="list">${declinedPlans.length ? declinedPlans.map(renderPlan).join('') : '<div class="empty">거절된 요청 없음</div>'}</div></div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function renderSettings() {
+      if (!session?.isAdmin) {
+        $('section-settings').innerHTML = `<div class="panel"><div class="panel-title">설정</div><div class="empty" style="margin-top:12px;">관리자 계정이 필요합니다</div></div>`;
+        return;
+      }
+      $('section-settings').innerHTML = `
+        <div class="grid">
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">운영 설정</div></div>
+            <div class="form-grid">
+              <div class="field col-6"><label>휴식 포인트 기준</label><input id="vacationThreshold" type="number" min="5" max="100" value="${state.settings.vacationThreshold}"></div>
+              <div class="field col-6"><label>주 시작</label><select id="weekStartsOn"><option value="1" ${state.settings.weekStartsOn === 1 ? 'selected' : ''}>월요일</option><option value="0" ${state.settings.weekStartsOn === 0 ? 'selected' : ''}>일요일</option></select></div>
+              <button class="btn primary col-6" onclick="saveSettings()">저장</button>
+              <button class="btn col-6" onclick="exportDailySummary()">오늘 요약 준비</button>
+              <button class="btn danger col-6" onclick="resetWeek()">이번 주 기록 삭제</button>
+              <button class="btn danger col-6" onclick="resetAll()">전체 초기화</button>
+            </div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">가족</div></div>
+            <div class="form-grid">
+              <div class="field col-3"><label>표시</label><input id="memberEmoji" maxlength="4" value="가"></div>
+              <div class="field col-4"><label>이름</label><input id="memberName" placeholder="이름"></div>
+              <div class="field col-3"><label>권한</label><select id="memberRole"><option value="adult">성인</option><option value="child">아이</option></select></div>
+              <button class="btn primary col-2" onclick="addMember()">추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.members.map(renderMemberSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">집안일</div></div>
+            <div class="form-grid">
+              <div class="field col-2"><label>표시</label><input id="choreEmoji" maxlength="4" value="일"></div>
+              <div class="field col-4"><label>이름</label><input id="choreName" placeholder="집안일"></div>
+              <div class="field col-3"><label>분류</label><select id="choreCategory">${Object.entries(CATEGORIES).filter(x => x[0] !== 'all').map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div>
+              <div class="field col-2"><label>포인트</label><input id="choreFatigue" type="number" min="1" max="10" value="2"></div>
+              <button class="btn primary col-1" onclick="addChore()">+</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.chores.map(renderChoreSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">육아 항목</div><span class="tag">교육 기본 포함</span></div>
+            <div class="form-grid">
+              <div class="field col-2"><label>표시</label><input id="careItemEmoji" maxlength="4" value="돌"></div>
+              <div class="field col-6"><label>이름</label><input id="careItemName" placeholder="육아 항목"></div>
+              <div class="field col-3"><label>포인트</label><input id="careItemPoints" type="number" min="1" max="100" value="2"></div>
+              <button class="btn primary col-1" onclick="addCareItem()">+</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${(state.careItems || []).map(renderCareItemSetting).join('')}</div>
+          </div>
+          <div class="panel span-6">
+            <div class="panel-head"><div class="panel-title">계정</div></div>
+            <div class="form-grid">
+              <div class="field col-3"><label>아이디</label><input id="accountId" placeholder="id"></div>
+              <div class="field col-3"><label>비밀번호</label><input id="accountPw" placeholder="password"></div>
+              <div class="field col-4"><label>연결</label><select id="accountMember"><option value="">관리자</option>${state.members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}</select></div>
+              <button class="btn primary col-2" onclick="addAccount()">추가</button>
+            </div>
+            <div class="list" style="margin-top:10px;">${state.accounts.map(renderAccountSetting).join('')}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderAccount() {
+      const profile = accountProfile || {};
+      const acc = account(session?.accountId);
+      const displayName = profile.displayName || acc?.displayName || acc?.id || '';
+      const householdName = profile.householdName || state.householdName || '';
+      $('section-account').innerHTML = `
+        <div class="grid">
+          <div class="panel span-6">
+            <div class="panel-head">
+              <div class="panel-title">내 계정</div>
+              <button class="btn" type="button" onclick="showTab('home')">돌아가기</button>
+            </div>
+            <div class="form-grid">
+              <div class="field col-12"><label>아이디</label><input id="accountEditId" value="${escapeHtml(profile.accountId || acc?.id || '')}" readonly></div>
+              <div class="field col-12"><label>표시 이름</label><input id="accountEditDisplayName" data-testid="account-display-name" value="${escapeHtml(displayName)}" placeholder="표시 이름"></div>
+              <div class="field col-12"><label>가족 이름</label><input id="accountEditHouseholdName" data-testid="account-household-name" value="${escapeHtml(householdName === 'ForHome' ? '' : householdName)}" placeholder="우리집 히어로"></div>
+              <div class="field col-12"><label>현재 비밀번호</label><input id="accountEditCurrentPw" data-testid="account-current-password" type="password" autocomplete="current-password" placeholder="비밀번호 변경 시 입력"></div>
+              <div class="field col-12"><label>새 비밀번호</label><input id="accountEditNewPw" data-testid="account-new-password" type="password" autocomplete="new-password" placeholder="변경하지 않으면 비워두세요"></div>
+              <button class="btn primary col-12" data-testid="account-save" type="button" onclick="saveAccountProfile()">저장</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function saveAccountProfile() {
+      const displayName = $('accountEditDisplayName').value.trim();
+      const householdName = $('accountEditHouseholdName').value.trim();
+      const currentPassword = $('accountEditCurrentPw').value;
+      const password = $('accountEditNewPw').value;
+      if (!displayName) return toast('표시 이름을 입력해 주세요');
+      if (password && !currentPassword) return toast('현재 비밀번호를 입력해 주세요');
+      const body = { displayName };
+      if (householdName) body.householdName = householdName;
+      if (password) {
+        body.currentPassword = currentPassword;
+        body.password = password;
+      }
+      try {
+        accountProfile = await storageProvider.updateProfile(body);
+        if (householdName) state.householdName = householdName;
+        else if (accountProfile.householdName) state.householdName = accountProfile.householdName;
+        if (TEST_MODE) await loadState();
+        else {
+          state = normalizeState(await storageProvider.loadState());
+          setStatus(`동기화됨 v${state.version || 0}`);
+        }
+        $('accountEditCurrentPw').value = '';
+        $('accountEditNewPw').value = '';
+        updateHeader();
+        renderAccount();
+        toast('계정 정보를 저장했습니다');
+      } catch (err) {
+        toast(err.message || '계정 정보 저장에 실패했습니다');
+      }
+    }
+
+    function proofCellHtml(entry) {
+      if (entry.proofImage) {
+        return `<img class="photo-cell" src="${entry.proofImage}" alt="증빙 사진">`;
+      }
+      if (entry.hasProofImage) {
+        return `<button type="button" class="photo-cell proof-load-btn" onclick="loadProofForEntry('${escapeHtml(entry.id)}', this)">사진 보기</button>`;
+      }
+      return `<div class="photo-cell" style="display:grid;place-items:center;color:var(--muted);font-size:12px;">사진 없음</div>`;
+    }
+
+    async function loadProofForEntry(entryId, buttonEl) {
+      if (!storageProvider?.getTaskProof) return;
+      if (proofImageCache.has(entryId)) {
+        replaceProofButton(buttonEl, proofImageCache.get(entryId));
+        return;
+      }
+      buttonEl.disabled = true;
+      buttonEl.textContent = '불러오는 중...';
+      try {
+        const proof = await storageProvider.getTaskProof(entryId);
+        const url = proof?.proofImage || '';
+        proofImageCache.set(entryId, url);
+        const entry = state.history.find(h => h.id === entryId);
+        if (entry) entry.proofImage = url;
+        replaceProofButton(buttonEl, url);
+      } catch (err) {
+        buttonEl.disabled = false;
+        buttonEl.textContent = '사진 보기';
+        toast(err.message || '사진을 불러오지 못했습니다');
+      }
+    }
+
+    function replaceProofButton(buttonEl, url) {
+      if (!url) {
+        buttonEl.textContent = '사진 없음';
+        buttonEl.disabled = true;
+        return;
+      }
+      const img = document.createElement('img');
+      img.className = 'photo-cell';
+      img.src = url;
+      img.alt = '증빙 사진';
+      buttonEl.replaceWith(img);
+    }
+
+    function renderActivity(entry) {
+      const m = member(entry.memberId);
+      const c = chore(entry.choreId);
+      const status = statusMeta(entry.verificationStatus);
+      const proof = proofCellHtml(entry);
+      return `<div class="review-row approval-card ${entry.verificationStatus === 'pending' ? 'pending' : ''}">${proof}<div class="grow"><div class="name-line"><strong>${escapeHtml(m?.name || '알 수 없음')} · ${escapeHtml(entry.choreName || c?.name || '집안일')}</strong><span class="tag ${status.className}">${status.label}</span></div><div class="mini">${formatTime(entry.timestamp)} · 수고 포인트 ${entry.fatigueAdded || 0}P · ${entry.xpEarned || 0}XP</div><div class="approval-list">${approvalBadges(entry)}</div><div class="mini">${escapeHtml(reviewProgressText(entry))}</div>${entry.proofCaption ? `<div class="mini">메모: ${escapeHtml(entry.proofCaption)}</div>` : ''}${entry.proofAnalysis ? `<div class="ai-result-card"><strong>AI 분석 결과</strong><div class="mini">${escapeHtml(entry.proofAnalysis)}</div></div>` : ''}${entry.reviewNote ? `<div class="mini">다시 확인 메모: ${escapeHtml(entry.reviewNote)}</div>` : ''}</div></div>`;
+    }
+
+    function renderReviewItem(entry) {
+      const canReview = canReviewEntry(entry);
+      return `<div>${renderActivity(entry)}<div class="review-actions"><button class="btn primary kid" ${canReview ? '' : 'disabled'} onclick="approveTask('${entry.id}')">확인했어요</button><button class="btn danger kid" ${canReview ? '' : 'disabled'} onclick="rejectTask('${entry.id}')">다시 확인 요청</button></div></div>`;
+    }
+
+    function renderChangeRequestItem(request) {
+      const requester = member(request.requestedBy);
+      const target = request.after || request.before || {};
+      const label = request.type.includes('chore') ? '집안일 항목' : '육아 항목';
+      const action = request.type.endsWith('add') ? '추가' : (request.type.endsWith('delete') ? '삭제' : '수정');
+      const canReview = canReviewChange(request);
+      const beforeText = request.before ? `${request.before.name} ${request.before.fatigue || request.before.points || 0}P` : '없음';
+      const afterText = request.after ? `${request.after.name} ${request.after.fatigue || request.after.points || 0}P` : '없음';
+      return `<div class="plan-row"><div class="name-line"><strong>${label} ${action}: ${escapeHtml(target.name || '항목')}</strong><span class="tag amber">승인 대기</span></div><div class="mini">요청자: ${escapeHtml(requester?.name || request.requestedBy || '관리자')} · ${formatTime(request.requestedAt)}</div><div class="mini">변경 전: ${escapeHtml(beforeText)} / 변경 후: ${escapeHtml(afterText)}</div><div class="approval-list">${approvalBadges(request)}</div><div class="review-actions"><button class="btn primary" ${canReview ? '' : 'disabled'} onclick="approveChangeRequest('${request.id}')">승인</button><button class="btn danger" ${canReview ? '' : 'disabled'} onclick="rejectChangeRequest('${request.id}')">반려</button></div></div>`;
+    }
+
+    function renderPlan(plan) {
+      const to = member(plan.toId);
+      const from = member(plan.fromId);
+      const c = chore(plan.choreId);
+      const closed = plan.status !== 'open';
+      const meta = requestMeta(plan.requestStatus);
+      const actions = plan.requestStatus === 'pending' && canRespondPlan(plan)
+        ? `<div class="review-actions"><button class="btn primary" data-testid="accept-plan" onclick="acceptPlan('${plan.id}')">승인</button><button class="btn danger" data-testid="decline-plan" onclick="declinePlan('${plan.id}')">거절</button></div>`
+        : (plan.requestStatus === 'accepted' && !closed ? `<div class="review-actions"><button class="btn" onclick="closeTomorrowPlan('${plan.id}')">완료 처리</button></div>` : '');
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(to?.name || '담당 미정')} · ${escapeHtml(plan.title || c?.name || '할 일')}</strong><span class="tag ${meta.className}">${closed ? '닫힘' : meta.label}</span></div><div class="mini">${plan.targetDate} · 요청 ${escapeHtml(from?.name || '관리자')} → ${escapeHtml(to?.name || '미정')}</div>${plan.note ? `<div class="mini">${escapeHtml(plan.note)}</div>` : ''}${plan.declineReason ? `<div class="mini">거절 이유: ${escapeHtml(plan.declineReason)}</div>` : ''}${actions}</div>`;
+    }
+
+    function renderCareSession(item) {
+      const m = member(item.memberId);
+      const c = member(item.childMemberId);
+      const selectedCareItem = careItem(item.careItemId);
+      const recipients = (item.pointRecipients || [item.memberId]).map(id => member(id)?.name || id).join(', ');
+      return `<div class="plan-row"><div class="name-line"><strong>${escapeHtml(m?.name || item.memberId)} · ${escapeHtml(selectedCareItem?.name || '육아')} · ${formatMinutes(item.minutes)}</strong><span class="tag teal">${item.points || 0}P</span></div><div class="mini">${item.startTime}-${item.endTime}${c ? ` · 아이: ${escapeHtml(c.name)}` : ''} · 포인트: ${escapeHtml(recipients)}</div>${item.note ? `<div class="mini">${escapeHtml(item.note)}</div>` : ''}</div>`;
+    }
+
+    function renderMemberSetting(m) {
+      return `<div class="account-row"><div class="avatar" style="background:${softColor(m.color)}">${escapeHtml(m.emoji)}</div><div class="grow"><strong>${escapeHtml(m.name)}</strong><div class="mini">${memberRole(m) === 'adult' ? '성인 권한' : '아이 권한'}</div></div><button class="btn icon danger" onclick="removeMember('${m.id}')">X</button></div>`;
+    }
+
+    function renderChoreSetting(c) {
+      return `<div class="account-row"><div class="avatar">${escapeHtml(c.emoji)}</div><div class="grow"><strong>${escapeHtml(c.name)}</strong><div class="mini">${CATEGORIES[c.category]} · ${c.fatigue}P · ${c.xp}XP</div></div><button class="btn icon danger" onclick="removeChore('${c.id}')">X</button></div>`;
+    }
+
+    function renderCareItemSetting(item) {
+      const locked = item.id === 'edu';
+      return `<div class="account-row"><div class="avatar">${escapeHtml(item.emoji)}</div><div class="grow"><strong>${escapeHtml(item.name)}</strong><div class="mini">${item.points}P · ${item.xp}XP${locked ? ' · 기본 항목' : ''}</div></div><button class="btn icon danger" ${locked ? 'disabled' : ''} onclick="removeCareItem('${item.id}')">X</button></div>`;
+    }
+
+    function renderAccountSetting(acc) {
+      const m = member(acc.memberId);
+      const label = acc.isAdmin ? '관리자' : `${m?.emoji || ''} ${m?.name || '연결 없음'}`;
+      return `<div class="account-row"><span class="tag blue">${escapeHtml(acc.id)}</span><div class="grow">${escapeHtml(label)}<div class="mini">${acc.password.replace(/./g, '*')}</div></div><button class="btn icon danger" onclick="removeAccount('${acc.id}')">X</button></div>`;
+    }
+
+    function approvalBadges(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '<span class="tag teal">승인 불필요</span>';
+      return requests.map(r => {
+        const meta = statusMeta(r.status);
+        const reviewer = member(r.reviewerId);
+        return `<span class="tag ${meta.className}">${escapeHtml(reviewer?.name || r.reviewerId)} ${r.status === 'approved' ? '확인 완료' : (r.status === 'rejected' ? '다시 확인 요청' : '확인 대기')}</span>`;
+      }).join('');
+    }
+
+    function approvalSummary(entry) {
+      const requests = entry.approvalRequests || [];
+      if (!requests.length) return '승인 불필요';
+      return requests.map(r => `${member(r.reviewerId)?.name || r.reviewerId} ${statusMeta(r.status).label}`).join(', ');
+    }
+
+    async function handleProofSelected(event) {
+      const file = event.target.files?.[0];
+      currentProof = null;
+      currentProofPromise = null;
+      const preview = $('proofPreview');
+      const status = $('proofStatus');
+      const aiText = $('aiAnalysisText');
+      if (!file) {
+        preview.hidden = true;
+        status.textContent = '사진 없음';
+        if (aiText) aiText.textContent = '사진을 올리면 크기와 파일 정보를 분석해서 보여줍니다.';
+        return;
+      }
+      status.textContent = '사진 확인 중';
+      if (aiText) aiText.textContent = 'AI가 사진 정보를 살펴보는 중입니다...';
+      currentProofPromise = readProofImage(file).then((proof) => {
+        currentProof = proof;
+        preview.src = proof.dataUrl;
+        preview.hidden = false;
+        status.textContent = proof.analysis;
+        if (aiText) aiText.textContent = proof.analysis;
+        return proof;
+      }).catch((err) => {
+        status.textContent = `사진 처리 실패: ${err.message}`;
+        if (aiText) aiText.textContent = err.message;
+        return null;
+      });
+      await currentProofPromise;
+    }
+
+    function readProofImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!file.type.startsWith('image/')) {
+          reject(new Error('이미지 파일만 등록할 수 있습니다'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const max = 720;
+            const scale = Math.min(1, max / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', .62);
+            const kb = Math.round(file.size / 1024);
+            resolve({ dataUrl, name: file.name, analysis: `사진 ${canvas.width}x${canvas.height}, 원본 ${kb}KB, ${file.name}` });
+          };
+          img.onerror = () => reject(new Error('사진을 읽을 수 없습니다'));
+          img.src = reader.result;
+        };
+        reader.onerror = () => reject(new Error('파일을 읽을 수 없습니다'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function completeTask() {
+      const m = member(selectedMemberId);
+      const c = chore(selectedChoreId);
+      if (!m || !c || !canActAs(m)) return;
+      if (currentProofPromise) await currentProofPromise;
+      const reviewers = requiredReviewersFor(m.id, c.category);
+      const caption = $('proofCaption')?.value.trim() || '';
+      const entry = {
+        id: `h${Date.now()}`,
+        memberId: m.id,
+        choreId: c.id,
+        choreName: c.name,
+        choreEmoji: c.emoji,
+        category: c.category,
+        fatigueAdded: Number(c.fatigue),
+        xpEarned: Number(c.xp),
+        timestamp: Date.now(),
+        verificationStatus: 'pending',
+        reviewerId: reviewers[0] || null,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: '',
+        approvalRequests: reviewers.map(reviewerId => ({ reviewerId, status: 'pending', reviewedAt: null, reviewNote: '' })),
+        proofImage: currentProof?.dataUrl || '',
+        proofImageName: currentProof?.name || '',
+        proofCaption: caption,
+        proofAnalysis: currentProof?.analysis || (caption ? '메모만 등록됨' : '사진/메모 없음')
+      };
+      syncEntryReviewStatus(entry);
+      state.history.push(entry);
+      applyMemberTotals();
+      reviewers.forEach((reviewerId, index) => {
+        state.messages.push({ id: `msg${Date.now()}${index}`, fromId: m.id, toId: reviewerId, text: `${m.name}님이 ${c.name} 완료 확인을 요청했습니다.`, timestamp: Date.now() });
+      });
+      showSuccess('기록', '확인 요청을 보냈습니다', `${c.name} 기록이 확인 대기로 저장되었습니다.`);
+      await saveStateOptimistic('확인 요청을 저장했습니다');
+    }
+
+    async function approveTask(id) {
+      const entry = state.history.find(h => h.id === id);
+      if (!entry || !canReviewEntry(entry)) return;
+      const note = prompt('확인 메모', '확인했어요') || '확인했어요';
+      reviewTargetsFor(entry).forEach(req => {
+        req.status = 'approved';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncEntryReviewStatus(entry);
+      if (entry.verificationStatus === 'approved') grantBadges(member(entry.memberId));
+      applyMemberTotals();
+      await saveStateOptimistic('확인했어요');
+    }
+
+    async function rejectTask(id) {
+      const entry = state.history.find(h => h.id === id);
+      if (!entry || !canReviewEntry(entry)) return;
+      const note = promptRequired('다시 확인할 내용', '사진이나 설명을 더 남겨주세요');
+      if (!note) return;
+      reviewTargetsFor(entry).forEach(req => {
+        req.status = 'rejected';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncEntryReviewStatus(entry);
+      applyMemberTotals();
+      await saveStateOptimistic('다시 확인 요청됨');
+    }
+
+    function requiredChangeReviewers() {
+      const requester = currentMemberId();
+      const adults = parentMembers().map(m => m.id).filter(id => id !== requester);
+      if (adults.length) return adults;
+      return state.members.map(m => m.id).filter(id => id !== requester);
+    }
+
+    function changeReviewTargetsFor(request) {
+      const requests = request.approvalRequests || [];
+      if (session?.isAdmin) return requests.filter(r => r.status === 'pending');
+      return requests.filter(r => r.reviewerId === session?.memberId && r.status === 'pending');
+    }
+
+    function canReviewChange(request) {
+      return !!session && request.status === 'pending' && changeReviewTargetsFor(request).length > 0;
+    }
+
+    function pendingChangeRequests() {
+      return (state.changeRequests || []).filter(r => r.status === 'pending' && (!session || canReviewChange(r))).sort((a, b) => b.requestedAt - a.requestedAt);
+    }
+
+    function syncChangeRequestStatus(request) {
+      const approvals = request.approvalRequests || [];
+      if (approvals.some(r => r.status === 'rejected')) request.status = 'rejected';
+      else if (!approvals.length || approvals.every(r => r.status === 'approved')) request.status = 'approved';
+      else request.status = 'pending';
+      return request.status;
+    }
+
+    function applyChangeRequest(request) {
+      if (!request || request.appliedAt) return;
+      if (request.type === 'chore.add' && request.after) state.chores.push(request.after);
+      if (request.type === 'chore.delete' && request.before) state.chores = state.chores.filter(c => c.id !== request.before.id);
+      if (request.type === 'care.add' && request.after) state.careItems.push(request.after);
+      if (request.type === 'care.delete' && request.before) state.careItems = state.careItems.filter(item => item.id !== request.before.id || item.id === 'edu');
+      request.appliedAt = Date.now();
+      if (selectedChoreId && !state.chores.some(c => c.id === selectedChoreId)) selectedChoreId = null;
+    }
+
+    async function approveChangeRequest(id) {
+      const request = (state.changeRequests || []).find(r => r.id === id);
+      if (!request || !canReviewChange(request)) return;
+      const note = prompt('승인 메모', '좋아요') || '좋아요';
+      changeReviewTargetsFor(request).forEach(req => {
+        req.status = 'approved';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      if (syncChangeRequestStatus(request) === 'approved') applyChangeRequest(request);
+      await saveStateOptimistic('설정 변경을 확인했습니다');
+    }
+
+    async function rejectChangeRequest(id) {
+      const request = (state.changeRequests || []).find(r => r.id === id);
+      if (!request || !canReviewChange(request)) return;
+      const note = promptRequired('반려 이유', '가족과 다시 상의해 주세요');
+      if (!note) return;
+      changeReviewTargetsFor(request).forEach(req => {
+        req.status = 'rejected';
+        req.reviewedAt = Date.now();
+        req.reviewNote = note;
+      });
+      syncChangeRequestStatus(request);
+      await saveStateOptimistic('설정 변경을 반려했습니다');
+    }
+
+    async function addTomorrowPlan() {
+      const toId = $('planTo')?.value;
+      const choreId = $('planChore')?.value;
+      const c = chore(choreId);
+      if (!toId || !c) return;
+      const targetDate = $('planDate')?.value || selectedDate || dateKey(nowMs());
+      state.tomorrowPlans.push({
+        id: `p${Date.now()}`,
+        fromId: currentMemberId() || 'admin',
+        toId,
+        choreId,
+        title: c.name,
+        note: $('planNote')?.value.trim() || '',
+        targetDate,
+        status: 'open',
+        requestStatus: 'pending',
+        declineReason: '',
+        respondedAt: null,
+        createdAt: Date.now()
+      });
+      state.messages.push({ id: `msg${Date.now()}`, fromId: currentMemberId() || 'admin', toId, text: `${c.name} 할 일 요청이 도착했습니다. 승인하면 ${targetDate} 할 일에 포함됩니다.`, timestamp: Date.now() });
+      await saveStateOptimistic('할 일 요청을 보냈습니다');
+    }
+
+    async function acceptPlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan || !canRespondPlan(plan)) return;
+      plan.requestStatus = 'accepted';
+      plan.status = 'open';
+      plan.respondedAt = Date.now();
+      plan.declineReason = '';
+      await saveStateOptimistic('오늘 할 일에 포함했습니다');
+    }
+
+    async function declinePlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan || !canRespondPlan(plan)) return;
+      const reason = promptRequired('할 수 없는 이유', '오늘은 시간이 맞지 않습니다');
+      if (!reason) return;
+      plan.requestStatus = 'declined';
+      plan.status = 'closed';
+      plan.respondedAt = Date.now();
+      plan.declineReason = reason;
+      await saveStateOptimistic('거절 이유를 저장했습니다');
+    }
+
+    async function closeTomorrowPlan(id) {
+      const plan = state.tomorrowPlans.find(p => p.id === id);
+      if (!plan) return;
+      plan.status = 'closed';
+      plan.closedAt = Date.now();
+      await saveStateOptimistic('할 일을 완료 처리했습니다');
+    }
+
+    async function saveCareAssignment() {
+      if (!canEditCare()) return;
+      const date = selectedDate || dateKey(nowMs());
+      const existing = state.careAssignments.find(a => a.date === date);
+      const next = {
+        date,
+        morningId: $('careMorning')?.value || 'mom',
+        eveningId: $('careEvening')?.value || 'dad',
+        updatedAt: Date.now()
+      };
+      if (existing) Object.assign(existing, next);
+      else state.careAssignments.push(next);
+      await saveStateOptimistic('육아 담당을 저장했습니다');
+    }
+
+    async function addCareSession() {
+      if (!canEditCare()) return;
+      const date = selectedDate || dateKey(nowMs());
+      const memberId = $('careMember')?.value;
+      const childMemberId = $('careChild')?.value || '';
+      const selectedCareItem = careItem($('careItem')?.value) || careItem('edu') || (state.careItems || [])[0];
+      const startTime = $('careStart')?.value;
+      const endTime = $('careEnd')?.value;
+      const minutes = minutesBetween(startTime, endTime);
+      if (!memberId || !isAdultMember(memberId)) return toast('성인 권한 구성원을 선택해 주세요');
+      if (!startTime || !endTime || minutes <= 0) return toast('시작/종료 시간을 확인해 주세요');
+      const pointRecipients = selectedCareItem?.id === 'edu' && childMemberId ? [memberId, childMemberId] : [memberId];
+      state.careSessions.push({
+        id: `care${Date.now()}`,
+        date,
+        memberId,
+        childMemberId,
+        careItemId: selectedCareItem?.id || 'edu',
+        pointRecipients,
+        points: Number(selectedCareItem?.points || 0),
+        xpEarned: Number(selectedCareItem?.xp || 0),
+        startTime,
+        endTime,
+        minutes,
+        note: $('careNote')?.value.trim() || '',
+        createdAt: Date.now()
+      });
+      applyMemberTotals();
+      await saveStateOptimistic('육아 시간을 저장했습니다');
+    }
+
+    function applyMemberTotals() {
+      state.members.forEach(m => {
+        const approved = state.history.filter(h => h.verificationStatus === 'approved' && isAwardedTo(h, m.id)).concat(carePointEntries().filter(h => isAwardedTo(h, m.id)));
+        m.completedTasks = approved.length;
+        m.totalFatigue = approved.reduce((s, h) => s + Number(h.fatigueAdded || h.points || 0), 0);
+        m.xp = approved.reduce((s, h) => s + Number(h.xpEarned || 0), 0);
+        m.stickers = approved.length;
+      });
+    }
+
+    function grantBadges(m) {
+      if (!m) return [];
+      if (!Array.isArray(m.earnedBadges)) m.earnedBadges = [];
+      const weekly = weekHistory().filter(h => h.verificationStatus === 'approved');
+      const created = [];
+      BADGES.forEach(b => {
+        if (!m.earnedBadges.includes(b.id) && b.cond(m, weekly)) {
+          m.earnedBadges.push(b.id);
+          state.badgeHistory.push({ id: `b${Date.now()}${b.id}`, memberId: m.id, badgeId: b.id, name: b.name, emoji: b.emoji || '', timestamp: Date.now() });
+          created.push(b);
+        }
+      });
+      return created;
+    }
+
+    function buildDailySummary() {
+      const todayKeyValue = dateKey(nowMs());
+      const tasks = todayHistory().map(h => ({ memberName: member(h.memberId)?.name || h.memberId, choreName: h.choreName, status: statusMeta(h.verificationStatus).label, approvals: approvalSummary(h), time: formatClock(h.timestamp) }));
+      const plans = plansForDate(todayKeyValue).map(p => ({ to: member(p.toId)?.name || p.toId, title: p.title, note: p.note, requestStatus: p.requestStatus, declineReason: p.declineReason || '' }));
+      const care = careSessionsFor(todayKeyValue).map(s => ({ memberName: member(s.memberId)?.name || s.memberId, startTime: s.startTime, endTime: s.endTime, minutes: s.minutes, note: s.note }));
+      return { date: todayKeyValue, tasks, plans, care, briefing: buildMorningBriefing(todayKeyValue) };
+    }
+
+    function buildMorningBriefing(key = dateKey(nowMs())) {
+      const yesterday = addDaysKey(key, -1);
+      return {
+        date: key,
+        yesterday,
+        yesterdayTasks: entriesByDate(yesterday),
+        yesterdayCare: careSessionsFor(yesterday),
+        assignment: careAssignmentFor(key),
+        todayPlans: plansForDate(key).filter(p => p.requestStatus === 'accepted' && p.status !== 'closed'),
+        pendingRequests: plansForDate(key).filter(p => p.requestStatus === 'pending')
+      };
+    }
+
+    function updateVacationFlags(target) {
+      const limit = Number(target.settings?.vacationThreshold || 25);
+      const weekStart = weekStartTsFor(target);
+      const careEntries = (target.careSessions || []).filter(s => Number(s.createdAt || 0) >= weekStart);
+      target.members?.forEach(m => {
+        const workPoints = target.history.filter(h => h.verificationStatus === 'approved' && (h.memberId === m.id || h.pointRecipients?.includes(m.id)) && Number(h.timestamp) >= weekStart).reduce((sum, h) => sum + Number(h.fatigueAdded || 0), 0);
+        const carePoints = careEntries.filter(s => s.memberId === m.id || s.pointRecipients?.includes(m.id)).reduce((sum, s) => sum + Number(s.points || 0), 0);
+        m.onVacation = workPoints + carePoints >= limit;
+      });
+    }
+
+    function currentMemberId() { return session?.memberId || null; }
+    function canReviewEntry(entry) { return !!session && reviewTargetsFor(entry).length > 0; }
+    function reviewableMembers(memberId) { return state.members.filter(m => m.id !== memberId); }
+    function pendingReviews() { return state.history.filter(h => h.verificationStatus === 'pending' && (!session || canReviewEntry(h))).sort((a, b) => b.timestamp - a.timestamp); }
+    function todayHistory() { const key = dateKey(nowMs()); return state.history.filter(h => dateKey(h.timestamp) === key).sort((a, b) => b.timestamp - a.timestamp); }
+    function tomorrowDateKey() { return addDaysKey(dateKey(nowMs()), 1); }
+    function tomorrowPlansFor(key) { return plansForDate(key); }
+    function statusMeta(status) { return REVIEW_STATUS[status] || REVIEW_STATUS.pending; }
+    function workRanking(items) {
+      const map = new Map();
+      items.forEach(item => {
+        const recipients = Array.isArray(item.pointRecipients) && item.pointRecipients.length ? item.pointRecipients : [item.memberId];
+        recipients.forEach(memberId => {
+          const current = map.get(memberId) || { member: member(memberId), count: 0, load: 0, items: [] };
+          current.count += 1;
+          current.load += Number(item.fatigueAdded || item.points || 0);
+          current.items.push(item);
+          map.set(memberId, current);
+        });
+      });
+      return [...map.values()].sort((a, b) => b.load - a.load || b.count - a.count);
+    }
+
+  function bindUiEvents() {
+    $('loginButton').addEventListener('click', doLogin);
+    $('signupButton').addEventListener('click', () => toast('회원가입 기능은 준비 중입니다.'));
+    $('loginPw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    $('currentUser').addEventListener('click', (e) => { e.stopPropagation(); toggleProfileMenu(); });
+    $('profileSettingBtn').addEventListener('click', (e) => { e.stopPropagation(); closeProfileMenu(); openAccountSettings(); });
+    $('profileLogoutBtn').addEventListener('click', (e) => { e.stopPropagation(); closeProfileMenu(); logout(); });
+    document.addEventListener('click', (e) => { if (profileMenuOpen && !$('userMenuWrap').contains(e.target)) closeProfileMenu(); });
+    $('reloadButton').addEventListener('click', hardReload);
+    $('closeDialog').addEventListener('click', () => $('successOverlay').hidden = true);
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+  }
+
+  function boot(options) {
+    SURFACE_MODE = (options && options.surface === 'mobile') ? 'mobile' : 'web';
+    document.documentElement.dataset.surface = SURFACE_MODE;
+    bindUiEvents();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  }
+
+  global.ForHomeApp = { boot };
+})(window);

@@ -103,3 +103,13 @@ test('postgres login screen hides before sync completes', async ({ page, request
   await expect(page.getByTestId('login-screen')).toBeHidden();
   await expect.poll(async () => page.locator('#syncStatus').textContent(), { timeout: 15000 }).toMatch(/동기화됨|요약 불러옴/);
 });
+
+test('mobile host serves mobile shell and home after login', async ({ page }) => {
+  await page.goto('http://m.localhost:8080/?storage=test');
+  await fillLoginForm(page, 'admin', 'admin1234');
+  await page.getByTestId('login-submit').click();
+  await expect(page.getByTestId('app-shell')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-surface', 'mobile');
+  await expect(page.locator('.tabbar')).toBeVisible();
+  await expect(page.locator('#section-home .panel-title', { hasText: '오늘 요약' })).toBeVisible();
+});

@@ -234,7 +234,14 @@
         || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)
         || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
         || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host);
-      if (isLocalHost) return url.origin;
+      if (isLocalHost) {
+        if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+          url.hostname = 'm.localhost';
+        } else if (!host.startsWith('m.')) {
+          url.hostname = 'm.' + host;
+        }
+        return url.origin;
+      }
       if (!host.startsWith('m.')) {
         url.hostname = host.startsWith('www.') ? 'm.' + host.slice(4) : 'm.' + host;
       }

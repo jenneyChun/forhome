@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko" data-surface="web">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>우리집 히어로</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&family=Gothic+A1:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shared/tokens.css">
+  <link rel="stylesheet" href="/shared/web.css">
+</head>
+<body>
+  <section class="login-screen" id="loginScreen" data-testid="login-screen">
+    <div class="login-box">
+      <div class="login-brand-center">
+        <div class="login-logo-tile">🏡</div>
+        <h1>우리집 히어로</h1>
+        <p class="login-tagline">가족이 함께 나누는 집안일<br>완료하고 · 확인받고 · 포인트 쌓기</p>
+        <div class="login-cat-chips">
+          <span class="login-cat-chip" style="background:#DFF4EC">🧹</span>
+          <span class="login-cat-chip" style="background:#EEE6FA">🍼</span>
+          <span class="login-cat-chip" style="background:#FFEBDB">🐾</span>
+          <span class="login-cat-chip" style="background:#FFE6E1">✨</span>
+        </div>
+      </div>
+      <div class="login-form">
+        <h2 class="login-greeting">다시 오셨네요 👋</h2>
+        <p class="login-sub" id="loginServerText" aria-live="polite">저장소 연결 확인 중</p>
+        <div class="field">
+          <label for="loginId">아이디</label>
+          <input id="loginId" data-testid="login-id" autocomplete="username" placeholder="아이디를 입력하세요">
+        </div>
+        <div class="field">
+          <label for="loginPw">비밀번호</label>
+          <input id="loginPw" data-testid="login-password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요">
+        </div>
+        <div class="error" id="loginError"></div>
+        <div class="login-actions">
+          <button class="btn primary kid" data-testid="login-submit" id="loginButton" type="button">로그인</button>
+          <button class="btn" data-testid="signup-submit" id="signupButton" type="button">회원가입</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="app-shell" id="appShell" data-testid="app-shell" hidden>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="app-title">
+          <div class="brand-mark" style="width:38px;height:38px;font-size:18px;border-radius:14px;">🏡</div>
+          <div>
+            <strong id="familyName">우리집 히어로</strong>
+            <div class="status-line" id="syncStatus" aria-live="polite">동기화 준비 중</div>
+          </div>
+        </div>
+        <div class="user-area">
+          <div class="user-menu-wrap" id="userMenuWrap">
+            <button class="user-pill" id="currentUser" type="button" aria-haspopup="true" aria-expanded="false" title="계정 메뉴"></button>
+            <div class="user-dropdown" id="userDropdown" hidden>
+              <button type="button" id="profileSettingBtn" data-testid="profile-setting">settings</button>
+              <button type="button" class="danger" id="profileLogoutBtn" data-testid="profile-logout">logout</button>
+            </div>
+          </div>
+          <button class="btn icon" id="reloadButton" title="Refresh">R</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="tabbar" aria-label="Main menu">
+        <button class="tab-btn active" data-tab="home" data-testid="tab-home"><span class="tab-emoji">🏠</span><span>브리핑</span></button>
+        <button class="tab-btn" data-tab="tasks" data-testid="tab-tasks"><span class="tab-emoji">📋</span><span>기록</span></button>
+        <button class="tab-btn" data-tab="badges" data-testid="tab-badges"><span class="tab-emoji">✅</span><span>확인</span></button>
+        <button class="tab-btn" data-tab="calendar" data-testid="tab-calendar"><span class="tab-emoji">📅</span><span>내일</span></button>
+        <button class="tab-btn" data-tab="settings" data-testid="tab-settings"><span class="tab-emoji">⚙️</span><span>설정</span></button>
+      </nav>
+
+      <main class="content">
+        <div class="app-loading" id="appLoading" data-testid="app-loading" hidden>
+          <div class="app-loading-box">데이터 불러오는 중...</div>
+        </div>
+        <section class="section active" id="section-home" data-testid="section-home"></section>
+        <section class="section" id="section-tasks" data-testid="section-tasks"></section>
+        <section class="section" id="section-calendar" data-testid="section-calendar"></section>
+        <section class="section" id="section-badges" data-testid="section-badges"></section>
+        <section class="section" id="section-settings" data-testid="section-settings"></section>
+        <section class="section" id="section-account" data-testid="section-account"></section>
+      </main>
+    </div>
+  </section>
+
+  <div class="overlay" id="successOverlay" hidden>
+    <div class="dialog">
+      <div class="dialog-emoji" id="successEmoji">완료</div>
+      <h2 id="successTitle">기록했습니다</h2>
+      <p id="successMessage"></p>
+      <button class="btn primary full" id="closeDialog">확인</button>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script src="/shared/forhome-core.js"></script>
+  <script>ForHomeApp.boot({ surface: 'web' });</script>
+</body>
+</html>

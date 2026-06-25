@@ -29,7 +29,10 @@ Write-Host "ForHome PostgreSQL API, backup, and structure tests"
     ForEach-Object { Assert-Dir $_ }
 
 @(
-    "code\index.html",
+    "code\web\index.html",
+    "code\mobile\index.html",
+    "code\shared\forhome-core.js",
+    "code\shared\tokens.css",
     "server\server.ps1",
     "server\db.ps1",
     "server\sql\schema.sql",
@@ -79,7 +82,8 @@ Assert-True ($docs.Count -gt 0) "requirements document exists in docs"
 $serverText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\server.ps1")
 $dbText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\db.ps1")
 $schemaText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\sql\schema.sql")
-$indexText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "code\index.html")
+$indexText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "code\shared\forhome-core.js")
+$webText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "code\web\index.html")
 $workflowText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot ".github\workflows\postgresql-backup.yml")
 $backupScriptText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "scripts\postgresql-backup.ps1")
 $sendKakaoText = Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot "server\send_kakao.ps1")
@@ -94,7 +98,9 @@ Assert-True ($serverText -match "/api/session") "server exposes session API"
 Assert-True ($serverText -match "/api/invites") "server exposes invitation API"
 Assert-True ($serverText -match "Set-Cookie") "server issues cookie headers"
 Assert-True ($serverText -match "HttpOnly") "server session cookie is httpOnly"
-Assert-True ($serverText -notmatch "api_removed") "server no longer removes local API routes"
+Assert-True ($serverText -match "Get-SurfaceClientRoot") "server routes static files by host"
+Assert-True ($serverText -match "m\.localhost") "server documents mobile host in CORS origins"
+Assert-True ($serverText -match "FORHOME_COOKIE_DOMAIN") "server supports shared cookie domain"
 
 Assert-True ($dbText -match "pbkdf2_sha256") "database layer hashes passwords with PBKDF2-SHA256"
 Assert-True ($dbText -match "token_hash") "database layer stores session token hash"
@@ -132,7 +138,9 @@ Assert-True ($serverText -match "/api/state/version") "server exposes state vers
 Assert-True ($serverText -match "/api/tasks/.*/proof") "server exposes task proof API"
 Assert-True ($indexText -match "loadSummaryThenFull") "client loads summary before full state"
 Assert-True ($dbText -match "Invoke-PsqlCsvBatch") "database layer batches PostgreSQL reads"
-Assert-True ($indexText -match 'data-testid="app-shell"') "client exposes app-shell test id for login navigation tests"
+Assert-True ($webText -match 'data-testid="app-shell"') "client exposes app-shell test id for login navigation tests"
+Assert-True ($webText -match 'data-surface="web"') "web shell marks web surface"
+Assert-True ($webText -match "/shared/forhome-core.js") "web shell loads shared core"
 
 Assert-True ($workflowText -match "PostgreSQL daily backup") "GitHub Actions backup is PostgreSQL-based"
 Assert-True ($workflowText -match "PGHOST") "GitHub Actions reads PostgreSQL connection secrets"

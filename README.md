@@ -5,6 +5,9 @@ ForHome is a family chore, care, tomorrow-plan, and message web app. Production 
 ## Folder Layout
 
 - `code/`: browser client code
+  - `code/web/`: PC web shell
+  - `code/mobile/`: mobile shell (`m.` host)
+  - `code/shared/`: shared JS/CSS and core logic
 - `server/`: PowerShell static file, auth, session, and PostgreSQL API server
 - `server/sql/schema.sql`: normalized PostgreSQL schema
 - `scripts/`: PostgreSQL backup and automation scripts
@@ -12,6 +15,8 @@ ForHome is a family chore, care, tomorrow-plan, and message web app. Production 
 - `log/`: local runtime logs and Playwright reports
 - `tests/`: structure tests, fixtures, and Playwright E2E tests
 - `docs/`: requirements, design notes, and Codex session notes
+- `Report/`: Cursor/Codex work and status reports
+- `Prompting/`: reusable prompts and agent instructions
 
 ## PostgreSQL Setup
 
@@ -54,8 +59,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1 -Port 8080
 
 Then open:
 
-- PC: `http://localhost:8080`
-- Mobile: use the LAN URL printed by the server window
+- Web: `http://localhost:8080`
+- Mobile: `http://m.localhost:8080`
+- LAN: use the URLs printed by the server window
 
 The server provides static files and API routes:
 
@@ -72,22 +78,44 @@ GET  /api/invites/:id
 POST /api/invites/:id
 ```
 
-## Mobile Layout
+## Web and Mobile Clients
 
-The dedicated mobile layout is enabled on an `m.` host. In production, connect `https://m.<domain>` to the same API server or reverse proxy. When a mobile device opens the regular web address, the app redirects to `https://m.<current-domain>`.
+ForHome ships **two separate browser clients** on the same API server (port 8080). The server picks the shell from the request `Host` header — no `?surface=` query string.
 
-For local checks, use the query string instead of a separate `m.` domain:
+| Client | Local URL | Static root | Layout |
+|--------|-----------|-------------|--------|
+| Web (PC) | `http://localhost:8080` | `code/web/` | Left sidebar tabs, 12-column grid |
+| Mobile | `http://m.localhost:8080` | `code/mobile/` | Bottom tab bar, single column |
 
-```text
-http://localhost:8080/?surface=mobile
-http://localhost:8080/?surface=web
+**Shared assets**
+
+| Path | Role |
+|------|------|
+| `code/shared/forhome-core.js` | State, API providers, render functions, events (`ForHomeApp.boot`) |
+| `code/shared/tokens.css` | urichib design tokens and shared component styles |
+| `code/shared/web.css` | PC-only layout overrides |
+| `code/shared/mobile.css` | Mobile-only layout (fixed bottom tabs) |
+
+Both shells expose the same five tabs and `data-testid` values: briefing (home), tasks, badges, calendar, settings.
+
+In production, point `https://<domain>` and `https://m.<domain>` at the same server.
+
+To share login between web and mobile subdomains locally, set in `data/db.env.ps1`:
+
+```powershell
+$env:FORHOME_COOKIE_DOMAIN = ".localhost"
 ```
+
+Without this, you must log in separately on `localhost` and `m.localhost`.
 
 Use browser mock storage only for Playwright or local UI tests:
 
 ```text
 http://localhost:8080/?storage=test
+http://m.localhost:8080/?storage=test
 ```
+
+Implementation details: [`Report/260625_web-mobile-client-split.ko.md`](Report/260625_web-mobile-client-split.ko.md)
 
 ## Invitation-Based Signup
 

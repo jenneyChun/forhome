@@ -18,8 +18,14 @@ ForHome은 집안일을 공유하는 가족 내부 SNS다.
 
 ## 주요 파일
 
-- `code/index.html`
-  - 현재 프론트엔드, 상태 관리, Firebase/localStorage 저장 로직이 모두 들어 있는 단일 HTML 앱이다.
+- `code/web/index.html`
+  - PC 웹 셸(좌측 탭, 12열 grid)
+- `code/mobile/index.html`
+  - 모바일 셸(하단 탭, `m.localhost` / `m.<domain>`)
+- `code/shared/forhome-core.js`
+  - 상태 관리, API provider, render 함수, 이벤트 로직
+- `code/shared/tokens.css`
+  - urichib 디자인 토큰 및 공통 컴포넌트 스타일
 - `docs/user-flow.md`
   - 화면 흐름과 사용자 동작의 기준 문서다.
 - `docs/pm-requirements.md`

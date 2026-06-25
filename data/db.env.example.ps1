@@ -7,3 +7,6 @@ $env:PGUSER = "postgres"
 # Required for password auth. Local dev: run `npm run setup:db` (auto-detects postgres/forhome).
 # Docker Compose uses forhome; a fresh Windows PostgreSQL install often uses postgres.
 # $env:PGPASSWORD = "forhome"
+
+# Optional: share login cookie between localhost and m.localhost (local dev)
+# $env:FORHOME_COOKIE_DOMAIN = ".localhost"
